@@ -2,6 +2,8 @@
 
 Create and manage Custom Hostnames for Cloudflare for SaaS. Custom Hostnames allow you to provide SSL certificates for your customer's domains that point to your Cloudflare zone.
 
+Learn more about [Cloudflare for SaaS domain support](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/domain-support/).
+
 ## Example Usage
 
 ### Basic Custom Hostname

@@ -10,6 +10,68 @@ import {
 import type { Zone } from "./zone.ts";
 
 /**
+ * SSL certificate validation method
+ */
+export type SslValidationMethod = "http" | "txt" | "email";
+
+/**
+ * SSL certificate type
+ */
+export type SslCertificateType = "dv";
+
+/**
+ * HTTP/2 setting
+ */
+export type Http2Setting = "on" | "off";
+
+/**
+ * TLS 1.3 setting
+ */
+export type Tls13Setting = "on" | "off";
+
+/**
+ * Minimum TLS version
+ */
+export type MinTlsVersion = "1.0" | "1.1" | "1.2" | "1.3";
+
+/**
+ * SSL certificate bundle method
+ */
+export type SslBundleMethod = "ubiquitous" | "optimal" | "force_ubiquitous";
+
+/**
+ * SSL certificate advanced settings
+ */
+export interface SslAdvancedSettings {
+  /**
+   * HTTP/2 settings
+   * "on" - Enable HTTP/2
+   * "off" - Disable HTTP/2
+   * @default "on"
+   */
+  http2?: Http2Setting;
+
+  /**
+   * TLS 1.3 settings
+   * "on" - Enable TLS 1.3
+   * "off" - Disable TLS 1.3
+   * @default "on"
+   */
+  tls_1_3?: Tls13Setting;
+
+  /**
+   * Minimum TLS version
+   * @default "1.2"
+   */
+  min_tls_version?: MinTlsVersion;
+
+  /**
+   * Cipher list
+   */
+  ciphers?: string[];
+}
+
+/**
  * SSL settings for custom hostname
  */
 export interface CustomHostnameSslSettings {
@@ -20,46 +82,19 @@ export interface CustomHostnameSslSettings {
    * "email" - Email validation
    * @default "http"
    */
-  method?: "http" | "txt" | "email";
+  method?: SslValidationMethod;
 
   /**
    * SSL certificate type
    * "dv" - Domain Validated
    * @default "dv"
    */
-  type?: "dv";
+  type?: SslCertificateType;
 
   /**
    * SSL certificate settings
    */
-  settings?: {
-    /**
-     * HTTP/2 settings
-     * "on" - Enable HTTP/2
-     * "off" - Disable HTTP/2
-     * @default "on"
-     */
-    http2?: "on" | "off";
-
-    /**
-     * TLS 1.3 settings
-     * "on" - Enable TLS 1.3
-     * "off" - Disable TLS 1.3
-     * @default "on"
-     */
-    tls_1_3?: "on" | "off";
-
-    /**
-     * Minimum TLS version
-     * @default "1.2"
-     */
-    min_tls_version?: "1.0" | "1.1" | "1.2" | "1.3";
-
-    /**
-     * Cipher list
-     */
-    ciphers?: string[];
-  };
+  settings?: SslAdvancedSettings;
 
   /**
    * Bundle method for certificate
@@ -68,7 +103,7 @@ export interface CustomHostnameSslSettings {
    * "force_ubiquitous" - Force ubiquitous bundle
    * @default "ubiquitous"
    */
-  bundle_method?: "ubiquitous" | "optimal" | "force_ubiquitous";
+  bundle_method?: SslBundleMethod;
 
   /**
    * Wildcard setting
@@ -123,17 +158,17 @@ interface CustomHostnameSslVerification {
 interface CustomHostnameSsl {
   id?: string;
   status: string;
-  method: string;
-  type: string;
+  method: SslValidationMethod;
+  type: SslCertificateType;
   verification_type?: string;
   verification_info?: CustomHostnameSslVerification;
   certificate_authority?: string;
-  bundle_method?: string;
+  bundle_method?: SslBundleMethod;
   wildcard?: boolean;
   settings?: {
-    http2?: string;
-    tls_1_3?: string;
-    min_tls_version?: string;
+    http2?: Http2Setting;
+    tls_1_3?: Tls13Setting;
+    min_tls_version?: MinTlsVersion;
     ciphers?: string[];
   };
 }
@@ -289,14 +324,6 @@ export const CustomHostname = Resource(
   ): Promise<CustomHostname> {
     // Create Cloudflare API client with automatic account discovery
     const api = await createCloudflareApi(props);
-
-    // Validate required properties
-    if (!props.hostname) {
-      throw new Error("Hostname (props.hostname) is required");
-    }
-    if (!props.zone) {
-      throw new Error("Zone (props.zone) is required");
-    }
 
     // Extract zone ID from Zone resource or use string directly
     const zoneId = typeof props.zone === "string" ? props.zone : props.zone.id;
@@ -554,74 +581,63 @@ function buildCustomHostnamePayload(props: CustomHostnameProps) {
 }
 
 /**
+ * Simple deep equality check for objects
+ */
+function deepEquals(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== "object" || typeof b !== "object") return false;
+
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+
+  if (keysA.length !== keysB.length) return false;
+
+  for (const key of keysA) {
+    if (!keysB.includes(key)) return false;
+    if (!deepEquals(a[key], b[key])) return false;
+  }
+
+  return true;
+}
+
+/**
  * Helper function to determine if a custom hostname needs updating
  */
 function doesCustomHostnameNeedUpdate(
   existing: CloudflareCustomHostname,
   props: CustomHostnameProps,
 ): boolean {
-  // Check SSL settings
-  if (props.ssl) {
-    if (props.ssl.method && existing.ssl.method !== props.ssl.method) {
-      return true;
+  // Build the expected payload from props
+  const expectedPayload = buildCustomHostnamePayload(props);
+
+  // Build the current payload from existing resource
+  const currentPayload: any = {
+    hostname: existing.hostname,
+  };
+
+  if (existing.ssl) {
+    currentPayload.ssl = {
+      method: existing.ssl.method,
+      type: existing.ssl.type,
+    };
+
+    if (existing.ssl.settings) {
+      currentPayload.ssl.settings = existing.ssl.settings;
     }
-    if (props.ssl.type && existing.ssl.type !== props.ssl.type) {
-      return true;
+
+    if (existing.ssl.bundle_method) {
+      currentPayload.ssl.bundle_method = existing.ssl.bundle_method;
     }
-    if (
-      props.ssl.bundle_method &&
-      existing.ssl.bundle_method !== props.ssl.bundle_method
-    ) {
-      return true;
-    }
-    if (
-      props.ssl.wildcard !== undefined &&
-      existing.ssl.wildcard !== props.ssl.wildcard
-    ) {
-      return true;
-    }
-    if (props.ssl.settings) {
-      const existingSettings = existing.ssl.settings || {};
-      if (
-        props.ssl.settings.http2 &&
-        existingSettings.http2 !== props.ssl.settings.http2
-      ) {
-        return true;
-      }
-      if (
-        props.ssl.settings.tls_1_3 &&
-        existingSettings.tls_1_3 !== props.ssl.settings.tls_1_3
-      ) {
-        return true;
-      }
-      if (
-        props.ssl.settings.min_tls_version &&
-        existingSettings.min_tls_version !== props.ssl.settings.min_tls_version
-      ) {
-        return true;
-      }
+
+    if (existing.ssl.wildcard !== undefined) {
+      currentPayload.ssl.wildcard = existing.ssl.wildcard;
     }
   }
 
-  // Check custom metadata
-  if (props.custom_metadata) {
-    const existingMetadata = existing.custom_metadata || {};
-    const newMetadata = props.custom_metadata;
-
-    // Compare metadata keys and values
-    const existingKeys = Object.keys(existingMetadata);
-    const newKeys = Object.keys(newMetadata);
-
-    if (existingKeys.length !== newKeys.length) {
-      return true;
-    }
-
-    for (const key of newKeys) {
-      if (existingMetadata[key] !== newMetadata[key]) {
-        return true;
-      }
-    }
+  if (existing.custom_metadata) {
+    currentPayload.custom_metadata = existing.custom_metadata;
   }
 
-  return false;
+  return !deepEquals(expectedPayload, currentPayload);
 }
