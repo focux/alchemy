@@ -7,6 +7,7 @@ import {
   type CloudflareApi,
   type CloudflareApiOptions,
 } from "./api.ts";
+import { DnsRecords, type DnsRecord } from "./dns-records.ts";
 import type { Worker } from "./worker.ts";
 import { getZoneByDomain } from "./zone.ts";
 
@@ -48,6 +49,15 @@ export interface RouteProps extends CloudflareApiOptions {
    * @default false
    */
   adopt?: boolean;
+
+  /**
+   * Whether to automatically create DNS records for the route
+   * When true, creates DNS records that point to Cloudflare's infrastructure to make the route accessible
+   * This matches the behavior of Wrangler CLI
+   *
+   * @default true
+   */
+  createDnsRecord?: boolean;
 }
 
 /**
@@ -73,13 +83,20 @@ export interface Route extends Resource<"cloudflare::Route">, RouteProps {
    * The Zone ID for the route
    */
   zoneId: string;
+
+  /**
+   * DNS records created for this route (if createDnsRecord was enabled)
+   */
+  dnsRecords?: DnsRecord[];
 }
 
 /**
  * Creates and manages Cloudflare Worker Routes.
  *
  * Routes map URL patterns to Worker scripts, allowing you to control which
- * requests are handled by your Workers.
+ * requests are handled by your Workers. By default, this also creates
+ * corresponding DNS records to make the routes accessible, matching the
+ * behavior of Wrangler CLI.
  *
  * @example
  * // Create a route that maps all requests on a domain to a Worker
@@ -122,6 +139,14 @@ export interface Route extends Resource<"cloudflare::Route">, RouteProps {
  *   script: "api-worker"
  * });
  *
+ * @example
+ * // Disable automatic DNS record creation
+ * const routeWithoutDns = await Route("no-dns-route", {
+ *   pattern: "api.example.com/*",
+ *   script: "my-worker",
+ *   createDnsRecord: false // Disables automatic DNS record creation
+ * });
+ *
  * @see https://developers.cloudflare.com/workers/configuration/routes/
  */
 export const Route = Resource(
@@ -144,6 +169,26 @@ export const Route = Resource(
       // If creation failed, we won't have proper output, so just skip deletion
       if (this.output?.id && this.output?.zoneId) {
         await deleteRoute(api, this.output.zoneId, this.output.id);
+
+        // Delete DNS records if they exist
+        if (this.output.dnsRecords && this.output.dnsRecords.length > 0) {
+          try {
+            await Promise.all(
+              this.output.dnsRecords.map(async (record) => {
+                const response = await api.delete(
+                  `/zones/${this.output.zoneId}/dns_records/${record.id}`,
+                );
+                if (!response.ok && response.status !== 404) {
+                  logger.error(
+                    `Failed to delete DNS record ${record.name}: ${response.statusText}`,
+                  );
+                }
+              }),
+            );
+          } catch (error) {
+            logger.error("Error deleting DNS records:", error);
+          }
+        }
       }
 
       // Return void (a deleted route has no content)
@@ -228,12 +273,48 @@ export const Route = Resource(
       }
     }
 
+    // Create DNS records if enabled (default: true)
+    let dnsRecords: DnsRecord[] = [];
+    const shouldCreateDns = props.createDnsRecord !== false;
+
+    if (shouldCreateDns) {
+      const recordNames = extractDnsRecordNamesFromPattern(props.pattern);
+
+      if (recordNames.length > 0) {
+        try {
+          const dnsRecordsResource = await DnsRecords(`${_id}-dns`, {
+            zoneId,
+            ...props, // Pass through API credentials
+            records: recordNames.map((name) => ({
+              name,
+              type: "AAAA" as const,
+              content: "100::",
+              proxied: true,
+              comment: `Auto-created for Worker route: ${props.pattern}`,
+            })),
+          });
+
+          dnsRecords = dnsRecordsResource.records;
+          logger.log(
+            `Created ${dnsRecords.length} DNS record(s) for route pattern: ${props.pattern}`,
+          );
+        } catch (error) {
+          logger.error(
+            `Failed to create DNS records for route ${props.pattern}:`,
+            error,
+          );
+          // Don't fail the route creation if DNS record creation fails
+        }
+      }
+    }
+
     // Return the route resource
     return this({
       id: routeData.result.id,
       pattern: routeData.result.pattern,
       script: routeData.result.script,
       zoneId,
+      dnsRecords: dnsRecords.length > 0 ? dnsRecords : undefined,
     });
   },
 );
@@ -449,4 +530,33 @@ async function inferZoneIdFromPattern(
   }
 
   return null;
+}
+
+/**
+ * Extract DNS record names from a route pattern
+ * Similar to how Wrangler determines which DNS records to create
+ * @param pattern The route pattern (e.g., "api.example.com/*", "*.example.com/api/*")
+ * @returns Array of DNS record names that should be created
+ */
+function extractDnsRecordNamesFromPattern(pattern: string): string[] {
+  // Remove protocol if present
+  let domain = pattern.replace(/^https?:\/\//, "");
+
+  // Remove path part (everything after the first '/')
+  domain = domain.split("/")[0];
+
+  // Remove port if present
+  domain = domain.split(":")[0];
+
+  // If the domain starts with a wildcard (*.), don't create a DNS record
+  // as wildcards are handled differently
+  if (domain.startsWith("*.")) {
+    return [];
+  }
+
+  // For specific subdomains, create DNS records
+  // Examples:
+  // - "api.example.com" -> ["api.example.com"]
+  // - "example.com" -> ["example.com"]
+  return [domain];
 }
