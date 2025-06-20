@@ -581,63 +581,119 @@ function buildCustomHostnamePayload(props: CustomHostnameProps) {
 }
 
 /**
- * Simple deep equality check for objects
- */
-function deepEquals(a: any, b: any): boolean {
-  if (a === b) return true;
-  if (a == null || b == null) return false;
-  if (typeof a !== "object" || typeof b !== "object") return false;
-
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-
-  if (keysA.length !== keysB.length) return false;
-
-  for (const key of keysA) {
-    if (!keysB.includes(key)) return false;
-    if (!deepEquals(a[key], b[key])) return false;
-  }
-
-  return true;
-}
-
-/**
  * Helper function to determine if a custom hostname needs updating
  */
 function doesCustomHostnameNeedUpdate(
   existing: CloudflareCustomHostname,
   props: CustomHostnameProps,
 ): boolean {
-  // Build the expected payload from props
-  const expectedPayload = buildCustomHostnamePayload(props);
-
-  // Build the current payload from existing resource
-  const currentPayload: any = {
-    hostname: existing.hostname,
-  };
-
-  if (existing.ssl) {
-    currentPayload.ssl = {
-      method: existing.ssl.method,
-      type: existing.ssl.type,
-    };
-
-    if (existing.ssl.settings) {
-      currentPayload.ssl.settings = existing.ssl.settings;
-    }
-
-    if (existing.ssl.bundle_method) {
-      currentPayload.ssl.bundle_method = existing.ssl.bundle_method;
-    }
-
-    if (existing.ssl.wildcard !== undefined) {
-      currentPayload.ssl.wildcard = existing.ssl.wildcard;
-    }
+  // Check hostname
+  if (existing.hostname !== props.hostname) {
+    return true;
   }
 
-  if (existing.custom_metadata) {
-    currentPayload.custom_metadata = existing.custom_metadata;
+  // Check SSL settings
+  if (props.ssl) {
+    if (!existing.ssl) {
+      return true;
+    }
+
+    // Check SSL method
+    const expectedMethod = props.ssl.method || "http";
+    if (existing.ssl.method !== expectedMethod) {
+      return true;
+    }
+
+    // Check SSL type
+    const expectedType = props.ssl.type || "dv";
+    if (existing.ssl.type !== expectedType) {
+      return true;
+    }
+
+    // Check SSL bundle method
+    if (props.ssl.bundle_method !== undefined) {
+      if (existing.ssl.bundle_method !== props.ssl.bundle_method) {
+        return true;
+      }
+    }
+
+    // Check SSL wildcard
+    if (props.ssl.wildcard !== undefined) {
+      if (existing.ssl.wildcard !== props.ssl.wildcard) {
+        return true;
+      }
+    }
+
+    // Check SSL settings
+    if (props.ssl.settings) {
+      if (!existing.ssl.settings) {
+        return true;
+      }
+
+      // Check HTTP/2 setting
+      if (props.ssl.settings.http2 !== undefined) {
+        if (existing.ssl.settings.http2 !== props.ssl.settings.http2) {
+          return true;
+        }
+      }
+
+      // Check TLS 1.3 setting
+      if (props.ssl.settings.tls_1_3 !== undefined) {
+        if (existing.ssl.settings.tls_1_3 !== props.ssl.settings.tls_1_3) {
+          return true;
+        }
+      }
+
+      // Check min TLS version
+      if (props.ssl.settings.min_tls_version !== undefined) {
+        if (existing.ssl.settings.min_tls_version !== props.ssl.settings.min_tls_version) {
+          return true;
+        }
+      }
+
+      // Check ciphers
+      if (props.ssl.settings.ciphers !== undefined) {
+        if (!existing.ssl.settings.ciphers) {
+          return true;
+        }
+        if (props.ssl.settings.ciphers.length !== existing.ssl.settings.ciphers.length) {
+          return true;
+        }
+        for (let i = 0; i < props.ssl.settings.ciphers.length; i++) {
+          if (props.ssl.settings.ciphers[i] !== existing.ssl.settings.ciphers[i]) {
+            return true;
+          }
+        }
+      }
+    }
+  } else if (existing.ssl) {
+    // Props has no SSL but existing has SSL - this is a change
+    return true;
   }
 
-  return !deepEquals(expectedPayload, currentPayload);
+  // Check custom metadata
+  if (props.custom_metadata) {
+    if (!existing.custom_metadata) {
+      return true;
+    }
+
+    // Check all keys in props.custom_metadata
+    for (const key of Object.keys(props.custom_metadata)) {
+      if (existing.custom_metadata[key] !== props.custom_metadata[key]) {
+        return true;
+      }
+    }
+
+    // Check if existing has keys that props doesn't have
+    for (const key of Object.keys(existing.custom_metadata)) {
+      if (!(key in props.custom_metadata)) {
+        return true;
+      }
+    }
+  } else if (existing.custom_metadata) {
+    // Props has no custom_metadata but existing has custom_metadata - this is a change
+    return true;
+  }
+
+  return false;
 }
