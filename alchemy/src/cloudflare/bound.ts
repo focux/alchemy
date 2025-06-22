@@ -36,9 +36,7 @@ type BoundWorker<
 export type Bound<T extends Binding> = T extends _DurableObjectNamespace<
   infer O
 >
-  ? DurableObjectNamespace<
-      O extends Rpc.DurableObjectBranded | undefined ? O : any
-    >
+  ? DurableObjectNamespace<O & Rpc.DurableObjectBranded>
   : T extends { type: "kv_namespace" }
     ? KVNamespace
     : T extends WorkerStub<infer RPC>
