@@ -140,6 +140,39 @@ const worker = await Worker("frontend", {
 });
 ```
 
+### Advanced Asset Routing
+
+Control when the worker script is invoked versus when static assets are served using the `assets` configuration:
+
+```ts
+import { Worker, Assets } from "alchemy/cloudflare";
+
+const assets = await Assets("static", {
+  path: "./public",
+});
+
+const worker = await Worker("frontend", {
+  name: "frontend-worker",
+  entrypoint: "./src/worker.ts",
+  bindings: {
+    ASSETS: assets,
+  },
+  assets: {
+    // Always run the worker for API routes, serve assets for everything else
+    run_worker_first: ["/api/*", "/auth/*"],
+    html_handling: "auto-trailing-slash",
+    not_found_handling: "single-page-application",
+  },
+});
+```
+
+The `run_worker_first` option accepts:
+- `false` (default): Always try to serve static assets first, fallback to worker
+- `true`: Always invoke the worker script, never serve static assets directly
+- `string[]`: Array of URL patterns - invoke worker for matching requests, serve assets for others
+
+This enables fine-grained control over routing behavior, perfect for single-page applications that need to handle API routes through the worker while serving static assets directly.
+
 ## Cron Triggers
 
 Schedule recurring tasks:
