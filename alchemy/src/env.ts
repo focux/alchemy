@@ -1,38 +1,41 @@
-export interface Env {
-  [key: string]: Promise<string>;
-  <T = string>(name: string, value?: T | undefined, error?: string): Promise<T>;
+declare global {
+  var __ALCHEMY_ENVS__: {
+    [name: string]: string;
+  };
 }
 
-export const env = new Proxy(_env, {
-  get: (_, name: string) => _env(name),
-  apply: (_, __, args: [string, any?, string?]) => _env(...args),
+// a global registry of all environment variables that we will use when serializing an application
+const globalEnvs: {
+  [name: string]: string;
+} = (globalThis.__ALCHEMY_ENVS__ ??= {});
+
+export interface Env {
+  [key: string]: string;
+}
+
+export const env = new Proxy((() => {}) as any, {
+  get: (_, name: string) => {
+    const value = environment?.[name];
+    if (typeof value === "string") {
+      return value;
+    }
+    globalEnvs[name] = value;
+    throw new Error(`Environment variable ${name} is not set`);
+  },
 }) as Env;
 
-async function _env<T = string>(
-  name: string,
-  value?: T | undefined,
-  error?: string,
-): Promise<T> {
-  if (value !== undefined) {
-    return value;
-  }
-  const env = await resolveEnv();
-  if (name in env) {
-    return env[name] as T;
-  }
-  throw new Error(error ?? `Environment variable ${name} is not set`);
-}
-
-async function resolveEnv(): Promise<Record<string, any>> {
-  if (typeof process !== "undefined") {
-    return process.env;
-  }
+let environment: Record<string, any> | undefined;
+if (typeof process !== "undefined") {
+  environment = process.env;
+} else if (typeof import.meta !== "undefined") {
+  environment = import.meta.env;
+} else {
   try {
     const { env } = await import("cloudflare:workers");
-    return env;
+    environment = env;
   } catch (_error) {}
-  if (typeof import.meta !== "undefined") {
-    return import.meta.env;
-  }
+}
+
+if (!environment) {
   throw new Error("No environment found");
 }

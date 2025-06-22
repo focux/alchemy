@@ -123,24 +123,16 @@ export function secret<S = string>(
 
 export namespace secret {
   export interface Env {
-    [key: string]: Promise<Secret>;
-    (name: string, value?: string, error?: string): Promise<Secret>;
+    [key: string]: Secret;
   }
 
-  export const env = new Proxy(_env, {
-    get: (_, name: string) => _env(name),
-    apply: (_, __, args: [string, any?, string?]) => _env(...args),
+  export const env = new Proxy({} as any, {
+    get: (_, name: string) => {
+      const result = alchemy.env[name];
+      if (typeof result === "string") {
+        return secret(result, name);
+      }
+      throw new Error(`Secret environment variable ${name} is not a string`);
+    },
   }) as Env;
-
-  async function _env(
-    name: string,
-    value?: string,
-    error?: string,
-  ): Promise<Secret> {
-    const result = await alchemy.env(name, value, error);
-    if (typeof result === "string") {
-      return secret(result, name);
-    }
-    throw new Error(`Secret environment variable ${name} is not a string`);
-  }
 }

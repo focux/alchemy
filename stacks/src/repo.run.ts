@@ -9,15 +9,7 @@ import { AccountId, Role, SSMParameter } from "alchemy/aws";
 import { GitHubOIDCProvider } from "alchemy/aws/oidc";
 import { AccountApiToken, R2Bucket } from "alchemy/cloudflare";
 import { GitHubSecret, RepositoryEnvironment } from "alchemy/github";
-import env, {
-  CLOUDFLARE_ACCOUNT_ID,
-  CLOUDFLARE_API_KEY,
-  CLOUDFLARE_EMAIL,
-  NEON_API_KEY,
-  OPENAI_API_KEY,
-  STRIPE_API_KEY,
-  UPSTASH_API_KEY,
-} from "./env.ts";
+import env from "./env.ts";
 
 const app = await alchemy("alchemy:repo", env);
 
@@ -79,27 +71,27 @@ const accountAccessToken = await AccountApiToken("account-access-token", {
 
 const secrets = {
   AWS_ROLE_ARN: githubRole.arn,
-  CLOUDFLARE_ACCOUNT_ID,
-  CLOUDFLARE_API_KEY,
-  CLOUDFLARE_EMAIL,
-  STRIPE_API_KEY,
-  OPENAI_API_KEY,
-  NEON_API_KEY,
+  CLOUDFLARE_ACCOUNT_ID: alchemy.env.CLOUDFLARE_ACCOUNT_ID,
+  CLOUDFLARE_API_KEY: alchemy.env.CLOUDFLARE_API_KEY,
+  CLOUDFLARE_EMAIL: alchemy.env.CLOUDFLARE_EMAIL,
+  STRIPE_API_KEY: alchemy.env.STRIPE_API_KEY,
+  OPENAI_API_KEY: alchemy.env.OPENAI_API_KEY,
+  NEON_API_KEY: alchemy.env.NEON_API_KEY,
   CLOUDFLARE_BUCKET_NAME: stateStore.name,
   R2_ACCESS_KEY_ID: accountAccessToken.accessKeyId,
   R2_SECRET_ACCESS_KEY: accountAccessToken.secretAccessKey,
-  SECRET_PASSPHRASE: alchemy.secret(process.env.SECRET_PASSPHRASE!),
-  UPSTASH_API_KEY,
+  SECRET_PASSPHRASE: alchemy.secret.env.SECRET_PASSPHRASE,
+  UPSTASH_API_KEY: alchemy.env.UPSTASH_API_KEY,
   UPSTASH_EMAIL: "sam@alchemy.run",
-  SENTRY_AUTH_TOKEN: await alchemy.secret.env.SENTRY_AUTH_TOKEN,
-  SENTRY_ORG: await alchemy.secret.env.SENTRY_ORG,
-  VERCEL_ACCESS_TOKEN: await alchemy.secret.env.VERCEL_ACCESS_TOKEN,
-  ALCHEMY_PASSWORD: await alchemy.secret.env.ALCHEMY_PASSWORD,
-  NPM_TOKEN: await alchemy.secret.env.NPM_TOKEN,
-  ALCHEMY_STATE_TOKEN: await alchemy.secret.env.ALCHEMY_STATE_TOKEN,
-  ANTHROPIC_API_KEY: await alchemy.secret.env.ANTHROPIC_API_KEY,
-  PLANETSCALE_ORG_ID: await alchemy.secret.env.PLANETSCALE_ORG_ID,
-  PLANETSCALE_API_TOKEN: await alchemy.secret.env.PLANETSCALE_API_TOKEN,
+  SENTRY_AUTH_TOKEN: alchemy.secret.env.SENTRY_AUTH_TOKEN,
+  SENTRY_ORG: alchemy.secret.env.SENTRY_ORG,
+  VERCEL_ACCESS_TOKEN: alchemy.secret.env.VERCEL_ACCESS_TOKEN,
+  ALCHEMY_PASSWORD: alchemy.secret.env.ALCHEMY_PASSWORD,
+  NPM_TOKEN: alchemy.secret.env.NPM_TOKEN,
+  ALCHEMY_STATE_TOKEN: alchemy.secret.env.ALCHEMY_STATE_TOKEN,
+  ANTHROPIC_API_KEY: alchemy.secret.env.ANTHROPIC_API_KEY,
+  PLANETSCALE_ORG_ID: alchemy.secret.env.PLANETSCALE_ORG_ID,
+  PLANETSCALE_API_TOKEN: alchemy.secret.env.PLANETSCALE_API_TOKEN,
 };
 
 await Promise.all([
@@ -116,7 +108,7 @@ await Promise.all([
         Object.fromEntries(
           Object.entries(secrets).map(([name, value]) => [
             name,
-            typeof value === "string" ? value : value.unencrypted,
+            typeof value === "string" ? value : value?.unencrypted,
           ]),
         ),
       ),

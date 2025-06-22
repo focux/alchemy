@@ -1,3 +1,4 @@
+import type { KVNamespace as _KVNamespace } from "@cloudflare/workers-types";
 import type { Pipeline } from "cloudflare:pipelines";
 import type { Secret } from "../secret.ts";
 import type { AiGatewayResource as _AiGateway } from "./ai-gateway.ts";
@@ -26,7 +27,7 @@ export type Bound<T extends Binding> = T extends _DurableObjectNamespace<
 >
   ? DurableObjectNamespace<O>
   : T extends { type: "kv_namespace" }
-    ? KVNamespace
+    ? _KVNamespace
     : T extends _Worker<any, infer RPC> | WorkerRef<infer RPC>
       ? Service<RPC> & {
           // cloudflare's Rpc.Provider type loses mapping between properties (jump to definition)

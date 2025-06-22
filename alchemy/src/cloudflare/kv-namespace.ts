@@ -1,3 +1,4 @@
+import type { KVNamespace as _KVNamespace } from "@cloudflare/workers-types";
 import type { Context } from "../context.ts";
 import { Resource, ResourceKind } from "../resource.ts";
 import { bind } from "../runtime/bind.ts";
@@ -9,7 +10,6 @@ import {
   type CloudflareApi,
   type CloudflareApiOptions,
 } from "./api.ts";
-import type { Bound } from "./bound.ts";
 
 /**
  * Properties for creating or updating a KV Namespace
@@ -102,7 +102,7 @@ export interface KVNamespaceResource
   modifiedAt: number;
 }
 
-export type KVNamespace = KVNamespaceResource & Bound<KVNamespaceResource>;
+export type KVNamespace = KVNamespaceResource & _KVNamespace;
 
 /**
  * A Cloudflare KV Namespace is a key-value store that can be used to store data for your application.
