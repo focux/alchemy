@@ -4,8 +4,6 @@ import { logger } from "../util/logger.ts";
 import { 
   createCloudflareSDK,
   type CloudflareSdkOptions,
-  handleCloudflareAPIError,
-  isCloudflareAPIError
 } from "./sdk.ts";
 import type {
   AlwaysUseHTTPSValue,
@@ -319,17 +317,17 @@ export const Zone = Resource(
     props: ZoneProps,
   ): Promise<Zone> {
     // Create Cloudflare SDK client with automatic account discovery
-    const sdk = await createCloudflareSDK(props);
+    const { client, accountId } = await createCloudflareSDK(props);
 
     if (this.phase === "delete") {
       if (this.output?.id && props.delete !== false) {
         try {
-          await sdk.deleteZone(this.output.id);
+          await client.zones.delete(this.output.id);
         } catch (error) {
-          if (isCloudflareAPIError(error) && error.status === 404) {
+          if (error?.status === 404) {
             logger.warn(`Zone '${props.name}' not found, skipping delete`);
           } else {
-            handleCloudflareAPIError(error, "delete", "zone", this.output.id);
+            throw error;
           }
         }
       } else {
@@ -340,17 +338,12 @@ export const Zone = Resource(
 
     if (this.phase === "update" && this.output?.id) {
       // Get zone details to verify it exists
-      let zoneData;
-      try {
-        const response = await sdk.getZone(this.output.id);
-        zoneData = response.result;
-      } catch (error) {
-        handleCloudflareAPIError(error, "get", "zone", props.name);
-      }
+      const response = await client.zones.get(this.output.id);
+      const zoneData = response.result;
 
       // Update zone settings if provided
       if (props.settings) {
-        await updateZoneSettingsSDK(sdk, this.output.id, props.settings);
+        await updateZoneSettings(client, this.output.id, props.settings);
         // Add a small delay to ensure settings are propagated
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
@@ -369,45 +362,49 @@ export const Zone = Resource(
         activatedAt: zoneData.activated_on
           ? new Date(zoneData.activated_on).getTime()
           : null,
-        settings: await getZoneSettingsSDK(sdk, zoneData.id),
+        settings: await getZoneSettings(client, zoneData.id),
       });
     }
     // Create new zone
     let zoneData;
     try {
-      const response = await sdk.createZone(
-        props.name,
-        props.type || "full",
-        props.jumpStart !== false,
-      );
+      const response = await client.zones.create({
+        name: props.name,
+        type: props.type || "full",
+        jump_start: props.jumpStart !== false,
+        account: {
+          id: accountId,
+        },
+      });
       zoneData = response.result;
     } catch (error) {
-      if (isCloudflareAPIError(error) && error.status === 400 && 
-          error.message?.includes("already exists")) {
+      if (error?.status === 400 && 
+          error?.message?.includes("already exists")) {
         // Zone already exists, fetch it instead
         logger.warn(
           `Zone '${props.name}' already exists during Zone create, adopting it...`,
         );
-        try {
-          const response = await sdk.listZones(props.name);
-          const zones = response.result || [];
-          if (zones.length === 0) {
-            throw new Error(
-              `Zone '${props.name}' does not exist, but the name is reserved for another user.`,
-            );
-          }
-          zoneData = zones[0];
-        } catch (fetchError) {
-          handleCloudflareAPIError(fetchError, "fetch existing", "zone", props.name);
+        const response = await client.zones.list({
+          name: props.name,
+          account: {
+            id: accountId,
+          },
+        });
+        const zones = response.result || [];
+        if (zones.length === 0) {
+          throw new Error(
+            `Zone '${props.name}' does not exist, but the name is reserved for another user.`,
+          );
         }
+        zoneData = zones[0];
       } else {
-        handleCloudflareAPIError(error, "create", "zone", props.name);
+        throw error;
       }
     }
 
     // Update zone settings if provided
     if (props.settings) {
-      await updateZoneSettingsSDK(sdk, zoneData.id, props.settings);
+      await updateZoneSettings(client, zoneData.id, props.settings);
       // Add a small delay to ensure settings are propagated
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
@@ -432,10 +429,10 @@ export const Zone = Resource(
 );
 
 /**
- * Helper function to update zone settings using SDK
+ * Helper function to update zone settings
  */
-async function updateZoneSettingsSDK(
-  sdk: any,
+async function updateZoneSettings(
+  client: any,
   zoneId: string,
   settings: ZoneProps["settings"],
 ): Promise<void> {
@@ -468,57 +465,105 @@ async function updateZoneSettingsSDK(
         if (!settingId) return;
 
         try {
-          await sdk.updateZoneSetting(zoneId, settingId, value);
+          // The SDK has specific methods for each setting type
+          switch (settingId) {
+            case "ssl":
+              await client.zones.settings.ssl.edit(zoneId, { value });
+              break;
+            case "always_use_https":
+              await client.zones.settings.alwaysUseHttps.edit(zoneId, { value });
+              break;
+            case "automatic_https_rewrites":
+              await client.zones.settings.automaticHttpsRewrites.edit(zoneId, { value });
+              break;
+            case "tls_1_3":
+              await client.zones.settings.tls13.edit(zoneId, { value });
+              break;
+            case "early_hints":
+              await client.zones.settings.earlyHints.edit(zoneId, { value });
+              break;
+            case "email_obfuscation":
+              await client.zones.settings.emailObfuscation.edit(zoneId, { value });
+              break;
+            case "browser_cache_ttl":
+              await client.zones.settings.browserCacheTtl.edit(zoneId, { value });
+              break;
+            case "development_mode":
+              await client.zones.settings.developmentMode.edit(zoneId, { value });
+              break;
+            case "http2":
+              await client.zones.settings.http2.edit(zoneId, { value });
+              break;
+            case "http3":
+              await client.zones.settings.http3.edit(zoneId, { value });
+              break;
+            case "ipv6":
+              await client.zones.settings.ipv6.edit(zoneId, { value });
+              break;
+            case "websockets":
+              await client.zones.settings.websockets.edit(zoneId, { value });
+              break;
+            case "0rtt":
+              await client.zones.settings.zeroRtt.edit(zoneId, { value });
+              break;
+            case "brotli":
+              await client.zones.settings.brotli.edit(zoneId, { value });
+              break;
+            case "hotlink_protection":
+              await client.zones.settings.hotlinkProtection.edit(zoneId, { value });
+              break;
+            case "min_tls_version":
+              await client.zones.settings.minTlsVersion.edit(zoneId, { value });
+              break;
+            default:
+              throw new Error(`Unknown zone setting: ${settingId}`);
+          }
         } catch (error) {
-          if (isCloudflareAPIError(error) && error.status === 400 && 
-              error.message?.includes("already enabled")) {
+          if (error?.status === 400 && 
+              error?.message?.includes("already enabled")) {
             logger.warn(`Warning: Setting '${key}' already enabled`);
             return;
           }
-          handleCloudflareAPIError(error, "update setting", key, zoneId);
+          throw error;
         }
       }),
   );
 }
 
 /**
- * Helper function to get current zone settings using SDK
+ * Helper function to get current zone settings
  */
-async function getZoneSettingsSDK(
-  sdk: any,
+async function getZoneSettings(
+  client: any,
   zoneId: string,
 ): Promise<Zone["settings"]> {
-  try {
-    const settingsResponse = await sdk.getZoneSettings(zoneId);
-    const settingsData = settingsResponse.result;
+  const settingsResponse = await client.zones.settings.list(zoneId);
+  const settingsData = settingsResponse.result;
 
-    // Helper to get setting value with default
-    const getSetting = <T>(id: string, defaultValue: T): T => {
-      const setting = settingsData.find((s: any) => s.id === id);
-      return (setting?.value as T) ?? defaultValue;
-    };
+  // Helper to get setting value with default
+  const getSetting = <T>(id: string, defaultValue: T): T => {
+    const setting = settingsData.find((s: any) => s.id === id);
+    return (setting?.value as T) ?? defaultValue;
+  };
 
-    return {
-      ssl: getSetting("ssl", "off"),
-      alwaysUseHttps: getSetting("always_use_https", "off"),
-      automaticHttpsRewrites: getSetting("automatic_https_rewrites", "off"),
-      tls13: getSetting("tls_1_3", "off"),
-      earlyHints: getSetting("early_hints", "off"),
-      emailObfuscation: getSetting("email_obfuscation", "off"),
-      browserCacheTtl: getSetting("browser_cache_ttl", 14400),
-      developmentMode: getSetting("development_mode", "off"),
-      http2: getSetting("http2", "on"),
-      http3: getSetting("http3", "on"),
-      ipv6: getSetting("ipv6", "on"),
-      websockets: getSetting("websockets", "on"),
-      zeroRtt: getSetting("0rtt", "off"),
-      brotli: getSetting("brotli", "on"),
-      hotlinkProtection: getSetting("hotlink_protection", "off"),
-      minTlsVersion: getSetting("min_tls_version", "1.0"),
-    };
-  } catch (error) {
-    handleCloudflareAPIError(error, "get settings", "zone", zoneId);
-  }
+  return {
+    ssl: getSetting("ssl", "off"),
+    alwaysUseHttps: getSetting("always_use_https", "off"),
+    automaticHttpsRewrites: getSetting("automatic_https_rewrites", "off"),
+    tls13: getSetting("tls_1_3", "off"),
+    earlyHints: getSetting("early_hints", "off"),
+    emailObfuscation: getSetting("email_obfuscation", "off"),
+    browserCacheTtl: getSetting("browser_cache_ttl", 14400),
+    developmentMode: getSetting("development_mode", "off"),
+    http2: getSetting("http2", "on"),
+    http3: getSetting("http3", "on"),
+    ipv6: getSetting("ipv6", "on"),
+    websockets: getSetting("websockets", "on"),
+    zeroRtt: getSetting("0rtt", "off"),
+    brotli: getSetting("brotli", "on"),
+    hotlinkProtection: getSetting("hotlink_protection", "off"),
+    minTlsVersion: getSetting("min_tls_version", "1.0"),
+  };
 }
 
 /**
@@ -547,40 +592,41 @@ export async function getZoneByDomain(
   domainName: string,
   options: Partial<CloudflareSdkOptions> = {},
 ): Promise<ZoneData | null> {
-  const sdk = await createCloudflareSDK(options);
+  const { client, accountId } = await createCloudflareSDK(options);
 
-  try {
-    const response = await sdk.listZones(domainName);
-    const zones = response.result || [];
+  const response = await client.zones.list({
+    name: domainName,
+    account: {
+      id: accountId,
+    },
+  });
+  const zones = response.result || [];
 
-    if (zones.length === 0) {
-      return null;
-    }
-
-    const zoneData = zones[0];
-
-    // Get zone settings
-    const settings = await getZoneSettingsSDK(sdk, zoneData.id);
-
-    return {
-      id: zoneData.id,
-      name: zoneData.name,
-      type: zoneData.type,
-      status: zoneData.status,
-      paused: zoneData.paused,
-      accountId: zoneData.account.id,
-      nameservers: zoneData.name_servers,
-      originalNameservers: zoneData.original_name_servers,
-      createdAt: new Date(zoneData.created_on).getTime(),
-      modifiedAt: new Date(zoneData.modified_on).getTime(),
-      activatedAt: zoneData.activated_on
-        ? new Date(zoneData.activated_on).getTime()
-        : null,
-      settings,
-    };
-  } catch (error) {
-    handleCloudflareAPIError(error, "fetch", "zone", domainName);
+  if (zones.length === 0) {
+    return null;
   }
+
+  const zoneData = zones[0];
+
+  // Get zone settings
+  const settings = await getZoneSettings(client, zoneData.id);
+
+  return {
+    id: zoneData.id,
+    name: zoneData.name,
+    type: zoneData.type,
+    status: zoneData.status,
+    paused: zoneData.paused,
+    accountId: zoneData.account.id,
+    nameservers: zoneData.name_servers,
+    originalNameservers: zoneData.original_name_servers,
+    createdAt: new Date(zoneData.created_on).getTime(),
+    modifiedAt: new Date(zoneData.modified_on).getTime(),
+    activatedAt: zoneData.activated_on
+      ? new Date(zoneData.activated_on).getTime()
+      : null,
+    settings,
+  };
 }
 
 /**

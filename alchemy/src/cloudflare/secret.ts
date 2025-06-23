@@ -8,10 +8,33 @@ import { logger } from "../util/logger.ts";
 import { 
   createCloudflareSDK,
   type CloudflareSdkOptions,
-  handleCloudflareAPIError,
-  isCloudflareAPIError
 } from "./sdk.ts";
-import { findSecretsStoreByName, SecretsStore } from "./secrets-store.ts";
+import { SecretsStore } from "./secrets-store.ts";
+
+/**
+ * Find a secrets store by name
+ */
+async function findSecretsStoreByName(
+  client: any,
+  accountId: string,
+  name: string,
+): Promise<{ id: string; createdAt?: number } | null> {
+  const response = await client.secretsStore.list({
+    account_id: accountId,
+  });
+
+  const stores = response.result || [];
+  const match = stores.find((store: any) => store.name === name);
+  
+  if (match) {
+    return {
+      id: match.id,
+      createdAt: match.created ? new Date(match.created).getTime() : undefined,
+    };
+  }
+
+  return null;
+}
 
 /**
  * Properties for creating or updating a Secret in a Secrets Store (internal interface)
@@ -181,11 +204,11 @@ const _Secret = Resource(
     name: string,
     props: _SecretProps,
   ): Promise<Secret> {
-    const sdk = await createCloudflareSDK(props);
+    const { client, accountId } = await createCloudflareSDK(props);
 
     const storeId =
       props.store?.id ??
-      (await findSecretsStoreByName(sdk as any, SecretsStore.Default))?.id ??
+      (await findSecretsStoreByName(client, accountId, SecretsStore.Default))?.id ??
       (
         await SecretsStore("default-store", {
           name: SecretsStore.Default,
@@ -196,7 +219,7 @@ const _Secret = Resource(
 
     if (this.phase === "delete") {
       if (props.delete !== false) {
-        await deleteSecretSDK(sdk, storeId, name);
+        await deleteSecret(client, accountId, storeId, name);
       }
       return this.destroy();
     }
@@ -207,7 +230,7 @@ const _Secret = Resource(
         : Date.now();
 
     // Insert or update the secret
-    await insertSecretSDK(sdk, storeId, name, props.value);
+    await insertSecret(client, accountId, storeId, name, props.value);
 
     return this({
       type: "secrets_store_secret",
@@ -222,63 +245,67 @@ const _Secret = Resource(
 );
 
 /**
- * Insert or update a secret in a secrets store using SDK
+ * Insert or update a secret in a secrets store
  */
-export async function insertSecretSDK(
-  sdk: any,
+export async function insertSecret(
+  client: any,
+  accountId: string,
   storeId: string,
   secretName: string,
   secretValue: AlchemySecret,
 ): Promise<void> {
   try {
     // First try to create the secret
-    await sdk.createSecrets(storeId, [
-      {
+    await client.secretsStore.secrets.create(storeId, {
+      account_id: accountId,
+      data: [{
         name: secretName,
         value: secretValue.unencrypted,
-      },
-    ]);
+        scopes: ["workers"],
+      }],
+    });
     return; // Secret created successfully
   } catch (error) {
-    if (isCloudflareAPIError(error)) {
-      // Check if it's an "already exists" error
-      const isAlreadyExists = 
-        error.status === 409 ||
-        error.message?.includes("secret_name_already_exists") ||
-        error.message?.includes("already exists");
+    // Check if it's an "already exists" error
+    const isAlreadyExists = 
+      error?.status === 409 ||
+      error?.message?.includes("secret_name_already_exists") ||
+      error?.message?.includes("already exists");
 
-      if (isAlreadyExists) {
-        // Secret already exists, find its ID and update it
-        const secretId = await getSecretIdSDK(sdk, storeId, secretName);
-        if (!secretId) {
-          throw new Error(`Secret '${secretName}' not found in store`);
-        }
-
-        try {
-          await sdk.updateSecret(storeId, secretId, secretValue.unencrypted);
-        } catch (updateError) {
-          handleCloudflareAPIError(updateError, "update", "secret", secretName);
-        }
-      } else {
-        // Some other error occurred during creation
-        handleCloudflareAPIError(error, "create", "secret", secretName);
+    if (isAlreadyExists) {
+      // Secret already exists, find its ID and update it
+      const secretId = await getSecretId(client, accountId, storeId, secretName);
+      if (!secretId) {
+        throw new Error(`Secret '${secretName}' not found in store`);
       }
+
+      await client.secretsStore.secrets.update(storeId, secretId, {
+        account_id: accountId,
+        data: {
+          value: secretValue.unencrypted,
+          scopes: ["workers"],
+        },
+      });
     } else {
+      // Some other error occurred during creation
       throw error;
     }
   }
 }
 
 /**
- * Get the ID of a secret by its name using SDK
+ * Get the ID of a secret by its name
  */
-async function getSecretIdSDK(
-  sdk: any,
+async function getSecretId(
+  client: any,
+  accountId: string,
   storeId: string,
   secretName: string,
 ): Promise<string | null> {
   try {
-    const response = await sdk.listSecrets(storeId);
+    const response = await client.secretsStore.secrets.list(storeId, {
+      account_id: accountId,
+    });
     const secrets = response.result || [];
     
     const secret = secrets.find((s: any) => s.name === secretName);
@@ -290,26 +317,29 @@ async function getSecretIdSDK(
 }
 
 /**
- * Delete a secret from a secrets store using SDK
+ * Delete a secret from a secrets store
  */
-export async function deleteSecretSDK(
-  sdk: any,
+export async function deleteSecret(
+  client: any,
+  accountId: string,
   storeId: string,
   secretName: string,
 ): Promise<void> {
   try {
-    const secretId = await getSecretIdSDK(sdk, storeId, secretName);
+    const secretId = await getSecretId(client, accountId, storeId, secretName);
     if (!secretId) {
       logger.warn(`Secret '${secretName}' not found, skipping delete`);
       return;
     }
 
-    await sdk.deleteSecret(storeId, secretId);
+    await client.secretsStore.secrets.delete(storeId, secretId, {
+      account_id: accountId,
+    });
   } catch (error) {
-    if (isCloudflareAPIError(error) && error.status === 404) {
+    if (error?.status === 404) {
       logger.warn(`Secret '${secretName}' not found, skipping delete`);
       return;
     }
-    handleCloudflareAPIError(error, "delete", "secret", secretName);
+    throw error;
   }
 }
