@@ -197,10 +197,20 @@ export default {
       }
 
       if (props.command) {
+        // Extract string bindings to include as environment variables
+        const stringBindings: Record<string, string> = {};
+        if (props.bindings) {
+          for (const [name, binding] of Object.entries(props.bindings)) {
+            if (typeof binding === "string") {
+              stringBindings[name] = binding;
+            }
+          }
+        }
+
         await Exec("build", {
           cwd,
           command: props.command,
-          env: props.env,
+          env: { ...props.env, ...stringBindings },
           memoize: props.memoize,
         });
       }
