@@ -1,8 +1,12 @@
 import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import { logger } from "../util/logger.ts";
-import { handleApiError } from "./api-error.ts";
-import { createCloudflareApi, type CloudflareApiOptions } from "./api.ts";
+import { 
+  createCloudflareSDK,
+  type CloudflareSdkOptions,
+  handleCloudflareAPIError,
+  isCloudflareAPIError
+} from "./sdk.ts";
 import type {
   AlwaysUseHTTPSValue,
   AutomaticHTTPSRewritesValue,
@@ -26,7 +30,7 @@ import type {
 /**
  * Properties for creating or updating a Zone
  */
-export interface ZoneProps extends CloudflareApiOptions {
+export interface ZoneProps extends CloudflareSdkOptions {
   /**
    * The domain name for the zone
    */
@@ -314,20 +318,19 @@ export const Zone = Resource(
     _id: string,
     props: ZoneProps,
   ): Promise<Zone> {
-    // Create Cloudflare API client with automatic account discovery
-    const api = await createCloudflareApi(props);
+    // Create Cloudflare SDK client with automatic account discovery
+    const sdk = await createCloudflareSDK(props);
 
     if (this.phase === "delete") {
       if (this.output?.id && props.delete !== false) {
-        const deleteResponse = await api.delete(`/zones/${this.output.id}`);
-
-        if (!deleteResponse.ok && deleteResponse.status !== 404) {
-          await handleApiError(
-            deleteResponse,
-            "delete",
-            "zone",
-            this.output.id,
-          );
+        try {
+          await sdk.deleteZone(this.output.id);
+        } catch (error) {
+          if (isCloudflareAPIError(error) && error.status === 404) {
+            logger.warn(`Zone '${props.name}' not found, skipping delete`);
+          } else {
+            handleCloudflareAPIError(error, "delete", "zone", this.output.id);
+          }
         }
       } else {
         logger.warn(`Zone '${props.name}' not found, skipping delete`);
@@ -337,20 +340,17 @@ export const Zone = Resource(
 
     if (this.phase === "update" && this.output?.id) {
       // Get zone details to verify it exists
-      const response = await api.get(`/zones/${this.output.id}`);
-
-      if (!response.ok) {
-        throw new Error(
-          `Error getting zone '${props.name}': ${response.statusText}`,
-        );
+      let zoneData;
+      try {
+        const response = await sdk.getZone(this.output.id);
+        zoneData = response.result;
+      } catch (error) {
+        handleCloudflareAPIError(error, "get", "zone", props.name);
       }
-
-      const zoneData = ((await response.json()) as { result: CloudflareZone })
-        .result;
 
       // Update zone settings if provided
       if (props.settings) {
-        await updateZoneSettings(api, this.output.id, props.settings);
+        await updateZoneSettingsSDK(sdk, this.output.id, props.settings);
         // Add a small delay to ensure settings are propagated
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
@@ -369,57 +369,45 @@ export const Zone = Resource(
         activatedAt: zoneData.activated_on
           ? new Date(zoneData.activated_on).getTime()
           : null,
-        settings: await getZoneSettings(api, zoneData.id),
+        settings: await getZoneSettingsSDK(sdk, zoneData.id),
       });
     }
     // Create new zone
-
-    const response = await api.post("/zones", {
-      name: props.name,
-      type: props.type || "full",
-      jump_start: props.jumpStart !== false,
-      account: {
-        id: api.accountId,
-      },
-    });
-
-    const body = await response.text();
     let zoneData;
-    if (!response.ok) {
-      if (response.status === 400 && body.includes("already exists")) {
+    try {
+      const response = await sdk.createZone(
+        props.name,
+        props.type || "full",
+        props.jumpStart !== false,
+      );
+      zoneData = response.result;
+    } catch (error) {
+      if (isCloudflareAPIError(error) && error.status === 400 && 
+          error.message?.includes("already exists")) {
         // Zone already exists, fetch it instead
         logger.warn(
           `Zone '${props.name}' already exists during Zone create, adopting it...`,
         );
-        const getResponse = await api.get(`/zones?name=${props.name}`);
-
-        if (!getResponse.ok) {
-          throw new Error(
-            `Error fetching existing zone '${props.name}': ${getResponse.statusText}`,
-          );
+        try {
+          const response = await sdk.listZones(props.name);
+          const zones = response.result || [];
+          if (zones.length === 0) {
+            throw new Error(
+              `Zone '${props.name}' does not exist, but the name is reserved for another user.`,
+            );
+          }
+          zoneData = zones[0];
+        } catch (fetchError) {
+          handleCloudflareAPIError(fetchError, "fetch existing", "zone", props.name);
         }
-
-        const zones = (
-          (await getResponse.json()) as { result: CloudflareZone[] }
-        ).result;
-        if (zones.length === 0) {
-          throw new Error(
-            `Zone '${props.name}' does not exist, but the name is reserved for another user.`,
-          );
-        }
-        zoneData = zones[0];
       } else {
-        throw new Error(
-          `Error creating zone '${props.name}': ${response.statusText}\n${body}`,
-        );
+        handleCloudflareAPIError(error, "create", "zone", props.name);
       }
-    } else {
-      zoneData = (JSON.parse(body) as { result: CloudflareZone }).result;
     }
 
     // Update zone settings if provided
     if (props.settings) {
-      await updateZoneSettings(api, zoneData.id, props.settings);
+      await updateZoneSettingsSDK(sdk, zoneData.id, props.settings);
       // Add a small delay to ensure settings are propagated
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
@@ -438,16 +426,16 @@ export const Zone = Resource(
       activatedAt: zoneData.activated_on
         ? new Date(zoneData.activated_on).getTime()
         : null,
-      settings: await getZoneSettings(api, zoneData.id),
+      settings: await getZoneSettingsSDK(sdk, zoneData.id),
     });
   },
 );
 
 /**
- * Helper function to update zone settings
+ * Helper function to update zone settings using SDK
  */
-async function updateZoneSettings(
-  api: any,
+async function updateZoneSettingsSDK(
+  sdk: any,
   zoneId: string,
   settings: ZoneProps["settings"],
 ): Promise<void> {
@@ -479,70 +467,58 @@ async function updateZoneSettings(
         const settingId = settingsMap[key as keyof typeof settings];
         if (!settingId) return;
 
-        const response = await api.patch(
-          `/zones/${zoneId}/settings/${settingId}`,
-          {
-            value,
-          } as UpdateZoneSettingParams,
-        );
-
-        if (!response.ok) {
-          const data = await response.text();
-          if (response.status === 400 && data.includes("already enabled")) {
+        try {
+          await sdk.updateZoneSetting(zoneId, settingId, value);
+        } catch (error) {
+          if (isCloudflareAPIError(error) && error.status === 400 && 
+              error.message?.includes("already enabled")) {
             logger.warn(`Warning: Setting '${key}' already enabled`);
             return;
           }
-          throw new Error(
-            `Failed to update zone setting ${key}: ${response.statusText}`,
-          );
+          handleCloudflareAPIError(error, "update setting", key, zoneId);
         }
       }),
   );
 }
 
 /**
- * Helper function to get current zone settings
+ * Helper function to get current zone settings using SDK
  */
-async function getZoneSettings(
-  api: any,
+async function getZoneSettingsSDK(
+  sdk: any,
   zoneId: string,
 ): Promise<Zone["settings"]> {
-  const settingsResponse = await api.get(`/zones/${zoneId}/settings`);
+  try {
+    const settingsResponse = await sdk.getZoneSettings(zoneId);
+    const settingsData = settingsResponse.result;
 
-  if (!settingsResponse.ok) {
-    throw new Error(
-      `Failed to fetch zone settings: ${settingsResponse.status} ${settingsResponse.statusText}`,
-    );
+    // Helper to get setting value with default
+    const getSetting = <T>(id: string, defaultValue: T): T => {
+      const setting = settingsData.find((s: any) => s.id === id);
+      return (setting?.value as T) ?? defaultValue;
+    };
+
+    return {
+      ssl: getSetting("ssl", "off"),
+      alwaysUseHttps: getSetting("always_use_https", "off"),
+      automaticHttpsRewrites: getSetting("automatic_https_rewrites", "off"),
+      tls13: getSetting("tls_1_3", "off"),
+      earlyHints: getSetting("early_hints", "off"),
+      emailObfuscation: getSetting("email_obfuscation", "off"),
+      browserCacheTtl: getSetting("browser_cache_ttl", 14400),
+      developmentMode: getSetting("development_mode", "off"),
+      http2: getSetting("http2", "on"),
+      http3: getSetting("http3", "on"),
+      ipv6: getSetting("ipv6", "on"),
+      websockets: getSetting("websockets", "on"),
+      zeroRtt: getSetting("0rtt", "off"),
+      brotli: getSetting("brotli", "on"),
+      hotlinkProtection: getSetting("hotlink_protection", "off"),
+      minTlsVersion: getSetting("min_tls_version", "1.0"),
+    };
+  } catch (error) {
+    handleCloudflareAPIError(error, "get settings", "zone", zoneId);
   }
-
-  const result =
-    (await settingsResponse.json()) as CloudflareZoneSettingResponse;
-  const settingsData = result.result;
-
-  // Helper to get setting value with default
-  const getSetting = <T>(id: string, defaultValue: T): T => {
-    const setting = settingsData.find((s: any) => s.id === id);
-    return (setting?.value as T) ?? defaultValue;
-  };
-
-  return {
-    ssl: getSetting("ssl", "off"),
-    alwaysUseHttps: getSetting("always_use_https", "off"),
-    automaticHttpsRewrites: getSetting("automatic_https_rewrites", "off"),
-    tls13: getSetting("tls_1_3", "off"),
-    earlyHints: getSetting("early_hints", "off"),
-    emailObfuscation: getSetting("email_obfuscation", "off"),
-    browserCacheTtl: getSetting("browser_cache_ttl", 14400),
-    developmentMode: getSetting("development_mode", "off"),
-    http2: getSetting("http2", "on"),
-    http3: getSetting("http3", "on"),
-    ipv6: getSetting("ipv6", "on"),
-    websockets: getSetting("websockets", "on"),
-    zeroRtt: getSetting("0rtt", "off"),
-    brotli: getSetting("brotli", "on"),
-    hotlinkProtection: getSetting("hotlink_protection", "off"),
-    minTlsVersion: getSetting("min_tls_version", "1.0"),
-  };
 }
 
 /**
@@ -569,48 +545,42 @@ async function getZoneSettings(
  */
 export async function getZoneByDomain(
   domainName: string,
-  options: Partial<CloudflareApiOptions> = {},
+  options: Partial<CloudflareSdkOptions> = {},
 ): Promise<ZoneData | null> {
-  const api = await createCloudflareApi(options);
+  const sdk = await createCloudflareSDK(options);
 
-  const response = await api.get(
-    `/zones?name=${encodeURIComponent(domainName)}`,
-  );
+  try {
+    const response = await sdk.listZones(domainName);
+    const zones = response.result || [];
 
-  if (!response.ok) {
-    throw new Error(
-      `Error fetching zone for '${domainName}': ${response.statusText}`,
-    );
+    if (zones.length === 0) {
+      return null;
+    }
+
+    const zoneData = zones[0];
+
+    // Get zone settings
+    const settings = await getZoneSettingsSDK(sdk, zoneData.id);
+
+    return {
+      id: zoneData.id,
+      name: zoneData.name,
+      type: zoneData.type,
+      status: zoneData.status,
+      paused: zoneData.paused,
+      accountId: zoneData.account.id,
+      nameservers: zoneData.name_servers,
+      originalNameservers: zoneData.original_name_servers,
+      createdAt: new Date(zoneData.created_on).getTime(),
+      modifiedAt: new Date(zoneData.modified_on).getTime(),
+      activatedAt: zoneData.activated_on
+        ? new Date(zoneData.activated_on).getTime()
+        : null,
+      settings,
+    };
+  } catch (error) {
+    handleCloudflareAPIError(error, "fetch", "zone", domainName);
   }
-
-  const zones = ((await response.json()) as { result: CloudflareZone[] })
-    .result;
-
-  if (zones.length === 0) {
-    return null;
-  }
-
-  const zoneData = zones[0];
-
-  // Get zone settings
-  const settings = await getZoneSettings(api, zoneData.id);
-
-  return {
-    id: zoneData.id,
-    name: zoneData.name,
-    type: zoneData.type,
-    status: zoneData.status,
-    paused: zoneData.paused,
-    accountId: zoneData.account.id,
-    nameservers: zoneData.name_servers,
-    originalNameservers: zoneData.original_name_servers,
-    createdAt: new Date(zoneData.created_on).getTime(),
-    modifiedAt: new Date(zoneData.modified_on).getTime(),
-    activatedAt: zoneData.activated_on
-      ? new Date(zoneData.activated_on).getTime()
-      : null,
-    settings,
-  };
 }
 
 /**

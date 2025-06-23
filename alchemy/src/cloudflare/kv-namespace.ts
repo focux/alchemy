@@ -3,18 +3,18 @@ import { Resource, ResourceKind } from "../resource.ts";
 import { bind } from "../runtime/bind.ts";
 import { logger } from "../util/logger.ts";
 import { withExponentialBackoff } from "../util/retry.ts";
-import { handleApiError } from "./api-error.ts";
 import {
-  createCloudflareApi,
-  type CloudflareApi,
-  type CloudflareApiOptions,
-} from "./api.ts";
+  createCloudflareSDK,
+  type CloudflareSdkOptions,
+  handleCloudflareAPIError,
+  isCloudflareAPIError
+} from "./sdk.ts";
 import type { Bound } from "./bound.ts";
 
 /**
  * Properties for creating or updating a KV Namespace
  */
-export interface KVNamespaceProps extends CloudflareApiOptions {
+export interface KVNamespaceProps extends CloudflareSdkOptions {
   /**
    * Title of the namespace
    */
@@ -182,8 +182,8 @@ const _KVNamespace = Resource(
     id: string,
     props: KVNamespaceProps,
   ): Promise<KVNamespaceResource> {
-    // Create Cloudflare API client with automatic account discovery
-    const api = await createCloudflareApi(props);
+    // Create Cloudflare SDK client with automatic account discovery
+    const sdk = await createCloudflareSDK(props);
 
     const title = props.title ?? id;
 
@@ -191,7 +191,7 @@ const _KVNamespace = Resource(
       // For delete operations, we need to check if the namespace ID exists in the output
       const namespaceId = this.output?.namespaceId;
       if (namespaceId && props.delete !== false) {
-        await deleteKVNamespace(api, namespaceId);
+        await deleteKVNamespaceSDK(sdk, namespaceId);
       }
 
       // Return minimal output for deleted state
@@ -211,22 +211,22 @@ const _KVNamespace = Resource(
     } else {
       try {
         // Try to create the KV namespace
-        const { id } = await createKVNamespace(api, {
+        const namespace = await createKVNamespaceSDK(sdk, {
           ...props,
           title,
         });
         createdAt = Date.now();
-        namespaceId = id;
+        namespaceId = namespace.result.id;
       } catch (error) {
         // Check if this is a "namespace already exists" error and adopt is enabled
         if (
           props.adopt &&
-          error instanceof Error &&
-          error.message.includes("already exists")
+          isCloudflareAPIError(error) &&
+          (error.status === 409 || error.message?.includes("already exists"))
         ) {
           logger.log(`Namespace '${title}' already exists, adopting it`);
           // Find the existing namespace by title
-          const existingNamespace = await findKVNamespaceByTitle(api, title);
+          const existingNamespace = await findKVNamespaceByTitleSDK(sdk, title);
 
           if (!existingNamespace) {
             throw new Error(
@@ -239,12 +239,12 @@ const _KVNamespace = Resource(
           createdAt = existingNamespace.createdAt || Date.now();
         } else {
           // Re-throw the error if adopt is false or it's not a "namespace already exists" error
-          throw error;
+          handleCloudflareAPIError(error, "create", "kv_namespace", title);
         }
       }
     }
 
-    await insertKVRecords(api, namespaceId, props);
+    await insertKVRecordsSDK(sdk, namespaceId, props);
 
     return this({
       type: "kv_namespace",
@@ -257,42 +257,36 @@ const _KVNamespace = Resource(
   },
 );
 
-export async function createKVNamespace(
-  api: CloudflareApi,
+export async function createKVNamespaceSDK(
+  sdk: any,
   props: KVNamespaceProps & {
     title: string;
   },
-): Promise<{ id: string }> {
-  const createResponse = await api.post(
-    `/accounts/${api.accountId}/storage/kv/namespaces`,
-    {
-      title: props.title,
-    },
-  );
-
-  if (!createResponse.ok) {
-    await handleApiError(createResponse, "create", "kv_namespace", props.title);
+): Promise<any> {
+  try {
+    return await sdk.createKVNamespace(props.title);
+  } catch (error) {
+    handleCloudflareAPIError(error, "create", "kv_namespace", props.title);
   }
-
-  return { id: ((await createResponse.json()) as any).result.id };
 }
 
-export async function deleteKVNamespace(
-  api: CloudflareApi,
+export async function deleteKVNamespaceSDK(
+  sdk: any,
   namespaceId: string,
 ) {
-  // Delete KV namespace
-  const deleteResponse = await api.delete(
-    `/accounts/${api.accountId}/storage/kv/namespaces/${namespaceId}`,
-  );
-
-  if (!deleteResponse.ok && deleteResponse.status !== 404) {
-    await handleApiError(deleteResponse, "delete", "kv_namespace", namespaceId);
+  try {
+    await sdk.deleteKVNamespace(namespaceId);
+  } catch (error) {
+    if (isCloudflareAPIError(error) && error.status === 404) {
+      logger.warn(`KV namespace '${namespaceId}' not found, skipping delete`);
+      return;
+    }
+    handleCloudflareAPIError(error, "delete", "kv_namespace", namespaceId);
   }
 }
 
-export async function insertKVRecords(
-  api: CloudflareApi,
+export async function insertKVRecordsSDK(
+  sdk: any,
   namespaceId: string,
   props: KVNamespaceProps,
 ) {
@@ -329,23 +323,12 @@ export async function insertKVRecords(
 
       await withExponentialBackoff(
         async () => {
-          const bulkResponse = await api.put(
-            `/accounts/${api.accountId}/storage/kv/namespaces/${namespaceId}/bulk`,
-            bulkPayload,
-          );
-
-          if (!bulkResponse.ok) {
-            const errorData: any = await bulkResponse.json().catch(() => ({
-              errors: [{ message: bulkResponse.statusText }],
-            }));
-            const errorMessage =
-              errorData.errors?.[0]?.message || bulkResponse.statusText;
-
-            // Throw error to trigger retry
-            throw new Error(`Error writing KV batch: ${errorMessage}`);
+          try {
+            return await sdk.bulkWriteKV(namespaceId, bulkPayload);
+          } catch (error) {
+            // Transform the error for retry logic
+            throw new Error(`Error writing KV batch: ${error}`);
           }
-
-          return bulkResponse;
         },
         (error) => {
           // Retry on "namespace not found" errors as they're likely propagation delays
@@ -369,10 +352,10 @@ interface CloudflareKVNamespace {
 }
 
 /**
- * Find a KV namespace by title with pagination support
+ * Find a KV namespace by title with pagination support using SDK
  */
-export async function findKVNamespaceByTitle(
-  api: CloudflareApi,
+export async function findKVNamespaceByTitleSDK(
+  sdk: any,
   title: string,
 ): Promise<{ id: string; createdAt?: number } | null> {
   let page = 1;
@@ -380,45 +363,31 @@ export async function findKVNamespaceByTitle(
   let hasMorePages = true;
 
   while (hasMorePages) {
-    const response = await api.get(
-      `/accounts/${api.accountId}/storage/kv/namespaces?page=${page}&per_page=${perPage}`,
-    );
+    try {
+      const response = await sdk.listKVNamespaces(page, perPage);
 
-    if (!response.ok) {
-      await handleApiError(response, "list", "kv_namespace", "all");
+      const namespaces = response.result || [];
+      const resultInfo = response.result_info;
+
+      // Look for a namespace with matching title
+      const match = namespaces.find((ns: CloudflareKVNamespace) => ns.title === title);
+      if (match) {
+        return {
+          id: match.id,
+          // Convert ISO string to timestamp if available, otherwise use current time
+          createdAt: match.created_on
+            ? new Date(match.created_on).getTime()
+            : undefined,
+        };
+      }
+
+      // Check if we've seen all pages
+      hasMorePages =
+        resultInfo && resultInfo.page * resultInfo.per_page < resultInfo.total_count;
+      page++;
+    } catch (error) {
+      handleCloudflareAPIError(error, "list", "kv_namespace", "all");
     }
-
-    const data = (await response.json()) as {
-      result: CloudflareKVNamespace[];
-      result_info: {
-        count: number;
-        page: number;
-        per_page: number;
-        total_count: number;
-      };
-      success: boolean;
-      errors: any[];
-    };
-
-    const namespaces = data.result;
-    const resultInfo = data.result_info;
-
-    // Look for a namespace with matching title
-    const match = namespaces.find((ns) => ns.title === title);
-    if (match) {
-      return {
-        id: match.id,
-        // Convert ISO string to timestamp if available, otherwise use current time
-        createdAt: match.created_on
-          ? new Date(match.created_on).getTime()
-          : undefined,
-      };
-    }
-
-    // Check if we've seen all pages
-    hasMorePages =
-      resultInfo.page * resultInfo.per_page < resultInfo.total_count;
-    page++;
   }
 
   // No matching namespace found
