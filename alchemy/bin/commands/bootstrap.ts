@@ -1,15 +1,10 @@
 import {
-  cancel,
-  confirm,
   intro,
-  isCancel,
   log,
   outro,
   spinner,
 } from "@clack/prompts";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import pc from "picocolors";
 
 import { createCloudflareApi } from "../../src/cloudflare/api.ts";
@@ -24,34 +19,15 @@ function generateSecureToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
-async function updateEnvFile(token: string): Promise<void> {
-  const envPath = join(process.cwd(), ".env");
-  let envContent = "";
-  
-  // Read existing .env file if it exists
-  if (existsSync(envPath)) {
-    envContent = readFileSync(envPath, "utf-8");
-  }
-  
-  // Check if ALCHEMY_STATE_TOKEN already exists
-  const lines = envContent.split("\n");
-  const tokenLineIndex = lines.findIndex((line) =>
-    line.startsWith("ALCHEMY_STATE_TOKEN=")
-  );
-  
-  if (tokenLineIndex !== -1) {
-    // Replace existing token
-    lines[tokenLineIndex] = `ALCHEMY_STATE_TOKEN=${token}`;
-  } else {
-    // Append new token (ensure there's a newline before if file isn't empty)
-    if (envContent && !envContent.endsWith("\n")) {
-      envContent += "\n";
-    }
-    lines.push(`ALCHEMY_STATE_TOKEN=${token}`);
-  }
-  
-  // Write back to file
-  writeFileSync(envPath, lines.join("\n"));
+function displayTokenInstructions(token: string): void {
+  log.info(`
+${pc.cyan("📋 Setup Instructions:")}
+
+Add the following line to your ${pc.yellow(".env")} file:
+
+${pc.green(`ALCHEMY_STATE_TOKEN=${token}`)}
+
+${pc.gray("If you don't have a .env file, create one in your project root.")}`);
 }
 
 export async function bootstrapAlchemy(
@@ -63,27 +39,6 @@ export async function bootstrapAlchemy(
 
     const options = { yes: isTest, ...cliOptions };
 
-    // Check if .env already has a token and ask for confirmation
-    const envPath = join(process.cwd(), ".env");
-    const hasExistingToken = existsSync(envPath) && 
-      readFileSync(envPath, "utf-8").includes("ALCHEMY_STATE_TOKEN=");
-
-    if (hasExistingToken && !options.force && !options.yes) {
-      const shouldOverwrite = await confirm({
-        message: "ALCHEMY_STATE_TOKEN already exists in .env. Overwrite?",
-        initialValue: false,
-      });
-
-      if (isCancel(shouldOverwrite)) {
-        cancel(pc.red("Operation cancelled."));
-        process.exit(0);
-      }
-
-      if (!shouldOverwrite) {
-        cancel(pc.yellow("Keeping existing token."));
-        process.exit(0);
-      }
-    }
 
     // Generate secure token
     const s = spinner();
@@ -109,10 +64,8 @@ export async function bootstrapAlchemy(
     
     s.stop(`DOStateStore worker deployed: ${pc.green(workerName)}`);
 
-    // Update .env file
-    s.start("Updating .env file...");
-    await updateEnvFile(token);
-    s.stop(".env file updated");
+    // Display token instructions
+    displayTokenInstructions(token);
 
     log.info(`Worker URL: ${pc.cyan(`https://${workerName}.${api.accountId}.workers.dev`)}`);
 
@@ -120,9 +73,10 @@ export async function bootstrapAlchemy(
     
     log.info(`
 ${pc.cyan("Next steps:")}
-1. Create your ${pc.yellow("alchemy.run.ts")} file
-2. Use ${pc.yellow("DOStateStore")} as your state store
-3. Run ${pc.yellow("bun ./alchemy.run.ts")} to deploy your app
+1. Add the token to your ${pc.yellow(".env")} file (see instructions above)
+2. Create your ${pc.yellow("alchemy.run.ts")} file
+3. Use ${pc.yellow("DOStateStore")} as your state store
+4. Run ${pc.yellow("bun ./alchemy.run.ts")} to deploy your app
 
 ${pc.cyan("Example alchemy.run.ts:")}
 ${pc.gray(`import { alchemy } from "alchemy";
