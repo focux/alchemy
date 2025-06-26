@@ -14,6 +14,7 @@ export * from "./bucket.ts";
 export * from "./bundle/external.ts";
 export * from "./bundle/local-dev-cloudflare-shim.ts";
 export * from "./certificate-pack.ts";
+export * from "./container.ts";
 export * from "./custom-domain.ts";
 export * from "./d1-clone.ts";
 export * from "./d1-database.ts";
