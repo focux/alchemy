@@ -56,9 +56,9 @@ export type CertificatePackStatus =
 export interface CertificatePackProps extends CloudflareApiOptions {
   /**
    * The zone to create the certificate pack for
-   * Can be a Zone resource or zone ID string
+   * Can be a Zone resource, zone ID string, or omitted to auto-infer from hosts
    */
-  zone: string | Zone;
+  zone?: string | Zone;
 
   /**
    * Certificate Authority to use for issuing the certificate
@@ -252,8 +252,46 @@ export const CertificatePack = Resource(
     // Create Cloudflare API client with automatic account discovery
     const api = await createCloudflareApi(props);
 
-    // Resolve zone ID from zone property
-    const zoneId = typeof props.zone === "string" ? props.zone : props.zone.id;
+    // Resolve zone ID and zone name
+    let zoneId: string;
+    let zoneName: string;
+
+    if (props.zone) {
+      // Zone provided - use it
+      if (typeof props.zone === "string") {
+        zoneId = props.zone;
+        // Try to get zone name from API for better error messages
+        try {
+          const zoneResponse = await api.get(`/zones/${zoneId}`);
+          if (zoneResponse.ok) {
+            const zoneData = (await zoneResponse.json()) as {
+              result: { name: string };
+            };
+            zoneName = zoneData.result.name;
+          } else {
+            zoneName = zoneId; // Fallback to ID
+          }
+        } catch {
+          zoneName = zoneId; // Fallback to ID
+        }
+      } else {
+        zoneId = props.zone.id;
+        zoneName = props.zone.name || props.zone.id;
+      }
+    } else {
+      // Auto-infer zone from the first host
+      if (props.hosts.length === 0) {
+        throw new Error(
+          "At least one host must be specified when zone is not provided",
+        );
+      }
+
+      logger.log(`Auto-inferring zone from hostname: ${props.hosts[0]}`);
+      const zoneInfo = await findZoneForHostname(api, props.hosts[0]);
+      zoneId = zoneInfo.zoneId;
+      zoneName = zoneInfo.zoneName;
+      logger.log(`Auto-inferred zone: ${zoneName} (${zoneId})`);
+    }
 
     if (this.phase === "delete") {
       if (this.output?.id && props.delete !== false) {
@@ -364,8 +402,7 @@ export const CertificatePack = Resource(
         validationMethod: updatedPack.validation_method,
         validityDays: updatedPack.validity_days,
         zoneId: updatedPack.zone_id,
-        zoneName:
-          (typeof props.zone === "string" ? zoneId : props.zone.name) || zoneId,
+        zoneName: zoneName,
       });
     }
 
@@ -379,7 +416,6 @@ export const CertificatePack = Resource(
     }
 
     // Validate that zone apex is included
-    const zoneName = typeof props.zone === "string" ? zoneId : props.zone.name;
     const hasZoneApex = props.hosts.some(
       (host) => host === zoneName || (zoneName && host === zoneName),
     );
@@ -388,6 +424,29 @@ export const CertificatePack = Resource(
       logger.warn(
         `Zone apex '${zoneName}' is not included in hosts. This may cause certificate validation issues.`,
       );
+    }
+
+    // Check for existing certificate pack that matches our configuration
+    const existingPack = await findMatchingCertificatePack(api, zoneId, props);
+
+    if (existingPack) {
+      // Adopt the existing certificate pack
+      logger.log(
+        `Adopting existing certificate pack ${existingPack.id} instead of creating a new one`,
+      );
+
+      return this({
+        id: existingPack.id,
+        certificateAuthority: existingPack.certificate_authority,
+        cloudflareBranding: existingPack.cloudflare_branding,
+        hosts: existingPack.hosts,
+        status: existingPack.status,
+        type: existingPack.type,
+        validationMethod: existingPack.validation_method,
+        validityDays: existingPack.validity_days,
+        zoneId: existingPack.zone_id,
+        zoneName: zoneName,
+      });
     }
 
     logger.log(
@@ -446,8 +505,7 @@ export const CertificatePack = Resource(
       validationMethod: createdPack.validation_method,
       validityDays: createdPack.validity_days,
       zoneId: createdPack.zone_id,
-      zoneName:
-        (typeof props.zone === "string" ? zoneId : props.zone.name) || zoneId,
+      zoneName: zoneName,
     });
   },
 );
@@ -531,4 +589,110 @@ export async function waitForCertificatePackActive(
   throw new Error(
     `Certificate pack did not become active within ${timeoutMs / 1000 / 60} minutes`,
   );
+}
+
+/**
+ * Helper function to find zone ID from a hostname
+ * Searches for the zone that matches the hostname or its parent domains
+ *
+ * @param api CloudflareApi instance
+ * @param hostname The hostname to find the zone for
+ * @returns Promise resolving to the zone ID and zone name
+ */
+async function findZoneForHostname(
+  api: CloudflareApi,
+  hostname: string,
+): Promise<{ zoneId: string; zoneName: string }> {
+  // Remove wildcard prefix if present
+  const cleanHostname = hostname.replace(/^\*\./, "");
+
+  // Get all zones and find the best match
+  const response = await api.get("/zones");
+
+  if (!response.ok) {
+    throw new Error(`Failed to list zones: ${response.statusText}`);
+  }
+
+  const zonesData = (await response.json()) as {
+    result: Array<{ id: string; name: string }>;
+  };
+
+  // Find the zone that best matches the hostname
+  // We look for the longest matching zone name (most specific)
+  let bestMatch: { zoneId: string; zoneName: string } | null = null;
+  let longestMatch = 0;
+
+  for (const zone of zonesData.result) {
+    if (
+      cleanHostname === zone.name ||
+      cleanHostname.endsWith(`.${zone.name}`)
+    ) {
+      if (zone.name.length > longestMatch) {
+        longestMatch = zone.name.length;
+        bestMatch = { zoneId: zone.id, zoneName: zone.name };
+      }
+    }
+  }
+
+  if (!bestMatch) {
+    throw new Error(
+      `Could not find zone for hostname '${hostname}'. Available zones: ${zonesData.result.map((z) => z.name).join(", ")}`,
+    );
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Helper function to find existing certificate packs that match the given configuration
+ * Used to adopt existing certificates instead of creating duplicates
+ *
+ * @param api CloudflareApi instance
+ * @param zoneId Zone ID to search in
+ * @param props Certificate pack properties to match
+ * @returns Promise resolving to matching certificate pack or null if none found
+ */
+async function findMatchingCertificatePack(
+  api: CloudflareApi,
+  zoneId: string,
+  props: CertificatePackProps,
+): Promise<CloudflareCertificatePack | null> {
+  const response = await api.get(`/zones/${zoneId}/ssl/certificate_packs`);
+
+  if (!response.ok) {
+    throw new Error(`Failed to list certificate packs: ${response.statusText}`);
+  }
+
+  const packsData = (await response.json()) as {
+    result: CloudflareCertificatePack[];
+  };
+
+  // Find a certificate pack that matches our configuration
+  for (const pack of packsData.result) {
+    // Skip deleted or expired packs
+    if (pack.status === "deleted" || pack.status === "expired") {
+      continue;
+    }
+
+    // Check if the configuration matches
+    if (
+      pack.certificate_authority === props.certificateAuthority &&
+      pack.validation_method === props.validationMethod &&
+      pack.validity_days === props.validityDays &&
+      pack.type === (props.type || "advanced")
+    ) {
+      // Check if all requested hosts are covered by this certificate pack
+      const packHosts = new Set(pack.hosts);
+      const allHostsCovered = props.hosts.every((host) => packHosts.has(host));
+
+      if (allHostsCovered) {
+        logger.log(
+          `Found existing certificate pack ${pack.id} that covers all requested hosts`,
+        );
+        return pack;
+      }
+    }
+  }
+
+  return null;
 }

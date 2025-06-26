@@ -302,6 +302,169 @@ describe("CertificatePack Resource", () => {
       await destroy(scope);
     }
   });
+
+  test("auto-infer zone from hostname", async (scope) => {
+    let zone: Zone | undefined;
+    let certificatePack: CertificatePack | undefined;
+
+    try {
+      // Create a test zone
+      zone = await Zone(`${testDomain}-auto-infer`, {
+        name: `${testDomain}-auto-infer`,
+        type: "full",
+        jumpStart: false,
+      });
+
+      // Create certificate pack without specifying zone - should auto-infer
+      certificatePack = await CertificatePack(
+        `${BRANCH_PREFIX}-auto-infer-cert`,
+        {
+          // zone: omitted - should auto-infer from hosts
+          certificateAuthority: "lets_encrypt",
+          hosts: [`${testDomain}-auto-infer`, `www.${testDomain}-auto-infer`],
+          validationMethod: "txt",
+          validityDays: 90,
+        },
+      );
+
+      expect(certificatePack.id).toBeTruthy();
+      expect(certificatePack.zoneId).toEqual(zone.id);
+      expect(certificatePack.zoneName).toEqual(`${testDomain}-auto-infer`);
+      expect(certificatePack.hosts).toEqual([
+        `${testDomain}-auto-infer`,
+        `www.${testDomain}-auto-infer`,
+      ]);
+
+      // Verify certificate pack was created in the correct zone
+      const getResponse = await api.get(
+        `/zones/${zone.id}/ssl/certificate_packs/${certificatePack.id}`,
+      );
+      expect(getResponse.status).toEqual(200);
+
+      const responseData: any = await getResponse.json();
+      expect(responseData.result.zone_id).toEqual(zone.id);
+    } finally {
+      await destroy(scope);
+
+      if (certificatePack && zone) {
+        await assertCertificatePackDoesNotExist(
+          api,
+          zone.id,
+          certificatePack.id,
+        );
+      }
+    }
+  });
+
+  test("adopt existing certificate pack instead of creating duplicate", async (scope) => {
+    let zone: Zone | undefined;
+    let firstCertificatePack: CertificatePack | undefined;
+    let secondCertificatePack: CertificatePack | undefined;
+
+    try {
+      // Create a test zone
+      zone = await Zone(`${testDomain}-adopt`, {
+        name: `${testDomain}-adopt`,
+        type: "full",
+        jumpStart: false,
+      });
+
+      // Create first certificate pack
+      firstCertificatePack = await CertificatePack(
+        `${BRANCH_PREFIX}-adopt-cert-1`,
+        {
+          zone: zone,
+          certificateAuthority: "lets_encrypt",
+          hosts: [`${testDomain}-adopt`, `www.${testDomain}-adopt`],
+          validationMethod: "txt",
+          validityDays: 90,
+        },
+      );
+
+      expect(firstCertificatePack.id).toBeTruthy();
+
+      // Create second certificate pack with same configuration - should adopt existing one
+      secondCertificatePack = await CertificatePack(
+        `${BRANCH_PREFIX}-adopt-cert-2`,
+        {
+          zone: zone,
+          certificateAuthority: "lets_encrypt",
+          hosts: [`${testDomain}-adopt`, `www.${testDomain}-adopt`],
+          validationMethod: "txt",
+          validityDays: 90,
+        },
+      );
+
+      // Should have the same ID (adopted the existing one)
+      expect(secondCertificatePack.id).toEqual(firstCertificatePack.id);
+      expect(secondCertificatePack.hosts).toEqual(firstCertificatePack.hosts);
+      expect(secondCertificatePack.certificateAuthority).toEqual(
+        firstCertificatePack.certificateAuthority,
+      );
+      expect(secondCertificatePack.validationMethod).toEqual(
+        firstCertificatePack.validationMethod,
+      );
+      expect(secondCertificatePack.validityDays).toEqual(
+        firstCertificatePack.validityDays,
+      );
+    } finally {
+      await destroy(scope);
+
+      // Both certificate pack references point to the same underlying cert,
+      // so we only need to check once
+      if (firstCertificatePack && zone) {
+        await assertCertificatePackDoesNotExist(
+          api,
+          zone.id,
+          firstCertificatePack.id,
+        );
+      }
+    }
+  });
+
+  test("auto-infer zone with wildcard hostname", async (scope) => {
+    let zone: Zone | undefined;
+    let certificatePack: CertificatePack | undefined;
+
+    try {
+      // Create a test zone
+      zone = await Zone(`${testDomain}-wildcard`, {
+        name: `${testDomain}-wildcard`,
+        type: "full",
+        jumpStart: false,
+      });
+
+      // Create certificate pack with wildcard hostname - should auto-infer zone
+      certificatePack = await CertificatePack(
+        `${BRANCH_PREFIX}-wildcard-cert`,
+        {
+          // zone: omitted - should auto-infer from wildcard host
+          certificateAuthority: "lets_encrypt",
+          hosts: [`*.${testDomain}-wildcard`, `${testDomain}-wildcard`],
+          validationMethod: "txt",
+          validityDays: 90,
+        },
+      );
+
+      expect(certificatePack.id).toBeTruthy();
+      expect(certificatePack.zoneId).toEqual(zone.id);
+      expect(certificatePack.zoneName).toEqual(`${testDomain}-wildcard`);
+      expect(certificatePack.hosts).toEqual([
+        `*.${testDomain}-wildcard`,
+        `${testDomain}-wildcard`,
+      ]);
+    } finally {
+      await destroy(scope);
+
+      if (certificatePack && zone) {
+        await assertCertificatePackDoesNotExist(
+          api,
+          zone.id,
+          certificatePack.id,
+        );
+      }
+    }
+  });
 });
 
 /**
