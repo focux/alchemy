@@ -84,7 +84,7 @@ import { DOStateStore } from "alchemy/cloudflare";
 
 const app = alchemy({
   name: "my-app",
-  state: DOStateStore(),
+  stateStore: (scope) => new DOStateStore(scope),
 });
 
 // Your resources here...
