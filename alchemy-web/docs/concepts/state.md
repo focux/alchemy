@@ -94,12 +94,56 @@ const app = await alchemy("my-app", {
 
 ### Durable Objects State Store (Recommended)
 
-For high-performance cloud state storage, use DOStateStore with Cloudflare Durable Objects.
+DOStateStore provides high-performance cloud state storage using Cloudflare Durable Objects backed by SQLite. It's the recommended approach for production deployments and CI/CD environments.
+
+**Benefits:**
+- High performance with SQLite-backed Durable Objects
+- Automatic scaling and geographic distribution
+- Strong consistency guarantees
+- No external database setup required
+
+#### Setup Guide
+
+**Step 1: Generate State Token**
+
+First, generate a secure token for authenticating with your state store:
+
+```bash
+# Generate a secure random token (32+ characters recommended)
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# Or use openssl
+openssl rand -hex 32
+
+# Or use a password manager to generate a secure random string
+```
+
+**Step 2: Set Environment Variables**
+
+```bash
+# Required: Authentication token for state store
+export ALCHEMY_STATE_TOKEN="your-generated-token-here"
+
+# Required: Cloudflare API credentials (choose one option)
+# Option 1: API Token (recommended)
+export CLOUDFLARE_API_TOKEN="your-api-token"
+
+# Option 2: API Key + Email
+export CLOUDFLARE_API_KEY="your-api-key"
+export CLOUDFLARE_EMAIL="your-email@example.com"
+
+# Optional: Specific account ID (auto-detected if not provided)
+export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+```
+
+> [!TIP]
+> For Cloudflare API credentials, see the [Cloudflare Auth Guide](../guides/cloudflare-auth.md) for detailed setup instructions.
+
+**Step 3: Use DOStateStore in Your App**
 
 ```typescript
 import { DOStateStore } from "alchemy/cloudflare";
 
-// Set CLOUDFLARE_API_KEY, CLOUDFLARE_EMAIL, and ALCHEMY_STATE_TOKEN env vars
 const app = await alchemy("my-app", {
   stage: "prod",
   phase: process.argv.includes("--destroy") ? "destroy" : "up",
@@ -107,10 +151,14 @@ const app = await alchemy("my-app", {
 });
 ```
 
-> [!TIP]
-> Credentials can be inferred from environment variables or OAuth. See the [Cloudflare Auth Guide](../guides/cloudflare-auth.md) for setup instructions.
+The DOStateStore will automatically:
+1. Create a Cloudflare Worker named "alchemy-state" (or your custom name)
+2. Deploy the state management logic with Durable Objects
+3. Secure the worker with your `ALCHEMY_STATE_TOKEN`
 
-You can also provide explicit configuration:
+#### Advanced Configuration
+
+You can customize the DOStateStore behavior:
 
 ```typescript
 import { DOStateStore } from "alchemy/cloudflare";
@@ -119,18 +167,54 @@ const app = await alchemy("my-app", {
   stage: "prod", 
   phase: process.argv.includes("--destroy") ? "destroy" : "up",
   stateStore: (scope) => new DOStateStore(scope, {
-    // Cloudflare API credentials
+    // Optional: Custom state key prefix (default: "alchemy")
+    prefix: "my-company",
+    
+    // Optional: Explicit Cloudflare credentials
     apiKey: alchemy.secret(process.env.CLOUDFLARE_API_KEY),
     email: process.env.CLOUDFLARE_EMAIL,
-    // Optional: customize worker name (defaults to "alchemy-state")
+    
+    // Optional: Worker configuration
     worker: {
-      name: "my-app-state"
+      name: "my-app-state",  // Custom worker name
+      token: "override-token", // Override ALCHEMY_STATE_TOKEN
+      force: false // Force worker recreation
     }
   })
 });
 ```
 
-DOStateStore automatically creates and manages a Cloudflare Worker with Durable Objects for state storage.
+#### Using Existing Worker
+
+If you've already deployed a state worker, you can reference it by URL:
+
+```typescript
+const app = await alchemy("my-app", {
+  stateStore: (scope) => new DOStateStore(scope, {
+    worker: {
+      url: "https://my-state-worker.my-subdomain.workers.dev",
+      token: process.env.ALCHEMY_STATE_TOKEN
+    }
+  })
+});
+```
+
+#### Troubleshooting
+
+**Token Authentication Errors**
+- Ensure `ALCHEMY_STATE_TOKEN` is set and matches what the worker expects
+- Verify the token is at least 32 characters long for security
+- Check that the token doesn't contain special characters that might be escaped
+
+**Worker Deployment Issues**
+- Verify your Cloudflare API credentials have Workers:Edit permissions
+- Check that your account has available Worker deployments
+- Ensure the worker name doesn't conflict with existing workers
+
+**Performance Considerations**
+- DOStateStore provides better performance than file-based stores for large infrastructures
+- State operations are automatically cached and optimized
+- Geographic distribution happens automatically through Cloudflare's edge network
 
 
 ### R2 Rest State Store

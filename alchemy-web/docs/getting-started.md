@@ -261,6 +261,47 @@ State files help Alchemy determine whether to create, update, delete, or skip re
 > [!TIP]
 > For production environments or CI/CD, you should use a persistent state store like [DOStateStore](./concepts/state.md#durable-objects-state-store-recommended) (preferred) or [R2RestStateStore](./concepts/state.md#r2-rest-state-store).
 
+## Setting Up Production State (DOStateStore)
+
+When you're ready to deploy to production or set up CI/CD, you'll want to use DOStateStore for reliable, distributed state management.
+
+### Quick Setup
+
+1. **Generate a secure token**:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+2. **Set environment variables**:
+   ```bash
+   export ALCHEMY_STATE_TOKEN="your-generated-token"
+   export CLOUDFLARE_API_TOKEN="your-cloudflare-token"
+   ```
+
+3. **Update your `alchemy.run.ts`**:
+   ```typescript
+   import alchemy from "alchemy";
+   import { Worker, DOStateStore } from "alchemy/cloudflare";
+
+   const app = await alchemy("my-first-app", {
+     stage: "prod",
+     // Add DOStateStore for production
+     stateStore: (scope) => new DOStateStore(scope)
+   });
+
+   const worker = await Worker("hello-worker", {
+     entrypoint: "./src/worker.ts",
+   });
+
+   console.log(`Worker deployed at: ${worker.url}`);
+   await app.finalize();
+   ```
+
+This setup automatically creates a Cloudflare Worker to manage your state, eliminating the need for local state files in production.
+
+> [!NOTE]
+> See the complete [DOStateStore setup guide](./concepts/state.md#durable-objects-state-store-recommended) for detailed configuration options and troubleshooting.
+
 ## Local Development
 
 Alchemy currently relies on `wrangler` CLI for local development.
