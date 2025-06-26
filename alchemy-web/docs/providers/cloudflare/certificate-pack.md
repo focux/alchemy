@@ -8,6 +8,7 @@ description: Learn how to create and manage Cloudflare Advanced Certificate Pack
 The Certificate Pack resource lets you create and manage [Cloudflare Advanced Certificate Packs](https://developers.cloudflare.com/api/resources/ssl/subresources/certificate_packs/) for flexible SSL/TLS certificates with multiple Certificate Authority options.
 
 **Important Requirements:**
+- **Advanced Certificate Manager (ACM) must be activated:** Before using Certificate Packs, you must activate ACM in your Cloudflare dashboard. Navigate to your domain > **SSL/TLS** > **Edge Certificates** and click **Activate** for Advanced Certificate Manager. This requires a $10/month subscription per domain.
 - Requires a paid Cloudflare plan (not available on Free plans)
 - Certificate provisioning can take up to 10 minutes
 - Most properties are immutable after creation (only `cloudflareBranding` can be updated)
