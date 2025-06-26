@@ -167,7 +167,7 @@ async function writeWranglerConfig(filePath: string, config: WranglerConfig) {
   );
 }
 
-const DefaultScopes = {
+export const DefaultScopes = {
   "account:read":
     "See your account info such as account details, analytics, and memberships.",
   "user:read":
@@ -204,10 +204,10 @@ const oauth = {
   DENIED_URI:
     "https://welcome.developers.workers.dev/wrangler-oauth-consent-denied",
 
-  async authorize() {
+  async authorize(customScopes?: string[]) {
     const { promise, resolve, reject } =
       Promise.withResolvers<WranglerConfig>();
-    const authorization = this.generateAuthorizationURL();
+    const authorization = this.generateAuthorizationURL(customScopes);
     const callback = new HTTPServer({
       port: 8976,
       fetch: async (req) => {
@@ -262,14 +262,17 @@ const oauth = {
     });
   },
 
-  generateAuthorizationURL() {
+  generateAuthorizationURL(customScopes?: string[]) {
     const state = crypto.randomBytes(32).toString("base64url");
     const verifier = crypto.randomBytes(96).toString("base64url");
     const challenge = crypto
       .createHash("sha256")
       .update(verifier)
       .digest("base64url");
-    const scopes = [...Object.keys(DefaultScopes), "offline_access"];
+    const scopes = customScopes ?? [
+      ...Object.keys(DefaultScopes),
+      "offline_access",
+    ];
     const url = new URL("https://dash.cloudflare.com/oauth2/auth");
     url.search = new URLSearchParams({
       response_type: "code",
@@ -351,4 +354,24 @@ interface OAuthTokens {
   refresh_token: string;
   expires_in: number;
   scope: string;
+}
+
+/**
+ * Login to Cloudflare using OAuth flow
+ * @param scopes Optional array of scopes to request. Defaults to all available scopes.
+ * @returns Promise that resolves when login is complete and credentials are saved
+ */
+export async function loginToCloudflare(scopes?: string[]): Promise<void> {
+  if (!isInteractive()) {
+    throw new Error(
+      "Cannot start login flow: not running in an interactive terminal",
+    );
+  }
+
+  const config = await oauth.authorize(scopes);
+  const filePath = await resolveWranglerConfigFile();
+  await writeWranglerConfig(filePath, config);
+
+  logger.log("🎉 Successfully logged in to Cloudflare!");
+  logger.log(`Scopes granted: ${config.scopes.join(", ")}`);
 }

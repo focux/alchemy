@@ -2,6 +2,7 @@
 
 import { createCli, trpcServer, zod as z } from "trpc-cli";
 import { createAlchemy } from "./commands/create.ts";
+import { runLogin, type LoginInput } from "./commands/login.ts";
 import { getPackageVersion } from "./services/get-package-version.ts";
 import {
   PackageManagerSchema,
@@ -72,6 +73,32 @@ const router = t.router({
         yes: isTest || options.yes,
       };
       await createAlchemy(combinedInput);
+    }),
+  login: t.procedure
+    .meta({
+      description: "Login to Cloudflare using OAuth",
+    })
+    .input(
+      z.tuple([
+        z
+          .object({
+            scopes: z
+              .array(z.string())
+              .optional()
+              .describe(
+                "Cloudflare OAuth scopes to request (defaults to all available scopes)",
+              ),
+          })
+          .optional()
+          .default({}),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      const [options] = input;
+      const loginInput: LoginInput = {
+        scopes: options.scopes,
+      };
+      await runLogin(loginInput);
     }),
 });
 
