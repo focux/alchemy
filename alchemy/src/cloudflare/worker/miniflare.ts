@@ -5,6 +5,8 @@ import type {
   WorkerOptions,
 } from "miniflare";
 import path from "node:path";
+import { WebSocketServer } from "ws";
+import { getAvailablePort } from "../../util/find-free-port.ts";
 import { logger } from "../../util/logger.ts";
 import { HTTPServer } from "./http-server.ts";
 import {
@@ -19,6 +21,7 @@ class MiniflareServer {
   workers = new Map<string, WorkerOptions>();
   servers = new Map<string, HTTPServer>();
   mixedModeProxies = new Map<string, MixedModeProxy>();
+  inspectorPort?: number;
 
   stream = new WritableStream<{
     worker: MiniflareWorkerOptions;
@@ -85,12 +88,55 @@ class MiniflareServer {
       return existing;
     }
     const server = new HTTPServer({
-      port: worker.port,
+      port: worker.port ?? (await getAvailablePort()),
       fetch: this.createRequestHandler(worker.name as string),
     });
+
+    // We proxy the chrome-devtools protocol because miniflare checks for
+    // origins; and inspect.localhost is not a valid origin.
+    this.setupInspectorWebSocketProxy(server, worker);
+
     this.servers.set(worker.name, server);
     await server.ready;
     return server;
+  }
+
+  private setupInspectorWebSocketProxy(server: HTTPServer, worker: any) {
+    const wss = new WebSocketServer({
+      server: server.server,
+    });
+
+    const inspectorUrl = `ws://localhost:${this.inspectorPort}/${worker.name}`;
+
+    wss.on("connection", function connection(clientWs) {
+      const inspectorWs = new WebSocket(inspectorUrl);
+
+      inspectorWs.onmessage = (event) => {
+        clientWs.send(event.data);
+      };
+
+      clientWs.on("message", function message(data) {
+        inspectorWs.send(data.toString());
+      });
+
+      clientWs.on("error", (error) => {
+        console.error(error); //log inspector crashed
+        inspectorWs.close();
+      });
+
+      clientWs.on("close", () => {
+        inspectorWs.close();
+      });
+
+      inspectorWs.onerror = (error) => {
+        console.error(error); //log inspector crashed
+        clientWs.close();
+      };
+
+      inspectorWs.onclose = () => {
+        clientWs.close();
+      };
+    });
   }
 
   private async dispose() {
@@ -132,6 +178,23 @@ class MiniflareServer {
   private createRequestHandler(name: string) {
     return async (req: Request) => {
       try {
+        const url = new URL(req.url);
+        const subdomain = url.hostname.split(".")[0];
+        if (subdomain === "inspect") {
+          if (url.pathname === "/" && url.searchParams.get("ws") == null) {
+            return Response.redirect(
+              `http://inspect.localhost:${url.port}?ws=localhost:${url.port}`,
+              302,
+            );
+          }
+          const app = await fetch(
+            `http://devtools.devprod.cloudflare.dev/${url.pathname === "/" ? "js_app" : url.pathname}`,
+          );
+          app.headers.delete("content-encoding");
+          app.headers.delete("content-length");
+          return app;
+        }
+
         if (!this.miniflare) {
           return new Response(
             "[Alchemy] Miniflare is not initialized. Please try again.",
@@ -170,7 +233,8 @@ class MiniflareServer {
 
   private async miniflareOptions(): Promise<MiniflareOptions> {
     const { getDefaultDevRegistryPath } = await import("miniflare");
-    return {
+    this.inspectorPort = this.inspectorPort ?? (await getAvailablePort());
+    const options = {
       workers: Array.from(this.workers.values()),
       defaultPersistRoot: path.join(process.cwd(), ".alchemy/miniflare"),
       unsafeDevRegistryPath: getDefaultDevRegistryPath(),
@@ -182,7 +246,9 @@ class MiniflareServer {
       r2Persist: true,
       secretsStorePersist: true,
       workflowsPersist: true,
+      inspectorPort: this.inspectorPort,
     };
+    return options;
   }
 }
 

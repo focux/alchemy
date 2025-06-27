@@ -225,6 +225,7 @@ export function buildMiniflareWorkerOptions({
     compatibilityDate,
     compatibilityFlags,
     unsafeDirectSockets: [{ entrypoint: undefined, proxy: true }],
+    unsafeInspectorProxy: true,
     // containerEngine: {
     //   localDocker: {
     //     socketPath: "/var/run/docker.sock",
