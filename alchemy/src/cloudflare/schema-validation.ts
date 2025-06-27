@@ -236,7 +236,7 @@ export const SchemaValidation = Resource(
     if (this.phase === "delete") {
       if (this.output?.id) {
         const deleteResponse = await api.delete(
-          `/zones/${zoneId}/api_gateway/schemas/${this.output.id}`,
+          `/zones/${zoneId}/schema_validation/schemas/${this.output.id}`,
         );
 
         if (!deleteResponse.ok && deleteResponse.status !== 404) {
@@ -267,7 +267,7 @@ export const SchemaValidation = Resource(
 
       // Update the schema
       const updateResponse = await api.put(
-        `/zones/${zoneId}/api_gateway/schemas/${this.output.id}`,
+        `/zones/${zoneId}/schema_validation/schemas/${this.output.id}`,
         {
           source: props.source,
           validation_enabled: props.validationEnabled ?? true,
@@ -314,12 +314,15 @@ export const SchemaValidation = Resource(
     }
 
     // Create new schema validation
-    const response = await api.post(`/zones/${zoneId}/api_gateway/schemas`, {
-      name: props.name,
-      kind: props.kind,
-      source: props.source,
-      validation_enabled: props.validationEnabled ?? true,
-    });
+    const response = await api.post(
+      `/zones/${zoneId}/schema_validation/schemas`,
+      {
+        name: props.name,
+        kind: props.kind,
+        source: props.source,
+        validation_enabled: props.validationEnabled ?? true,
+      },
+    );
 
     if (!response.ok) {
       await handleApiError(response, "create", "schema validation", id);

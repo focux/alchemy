@@ -2,8 +2,8 @@ import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import { handleApiError } from "./api-error.ts";
 import { createCloudflareApi, type CloudflareApiOptions } from "./api.ts";
-import type { Zone } from "./zone.ts";
 import type { SchemaValidation } from "./schema-validation.ts";
+import type { Zone } from "./zone.ts";
 
 /**
  * HTTP methods supported by API Gateway Operations
@@ -344,7 +344,7 @@ export const ApiGatewayOperation = Resource(
         );
       }
 
-      // Update the operation
+      // Update the operation - use the single operation endpoint for updates too
       const updatePayload = createOperationPayload(props);
       const updateResponse = await api.put(
         `/zones/${zoneId}/api_gateway/operations/${this.output.id}`,
@@ -388,7 +388,7 @@ export const ApiGatewayOperation = Resource(
     // Create new operation
     const createPayload = createOperationPayload(props);
     const response = await api.post(
-      `/zones/${zoneId}/api_gateway/operations`,
+      `/zones/${zoneId}/api_gateway/operations/item`,
       createPayload,
     );
 
@@ -465,8 +465,8 @@ function mapApiResponseToOutput(
     host: data.host,
     method: data.method as HttpMethod,
     features: {},
-    createdAt: data.created_at,
-    updatedAt: data.updated_at,
+    createdAt: data.created_at || data.last_updated || new Date().toISOString(),
+    updatedAt: data.updated_at || data.last_updated || new Date().toISOString(),
   };
 
   if (data.features) {
@@ -519,6 +519,8 @@ interface CloudflareApiGatewayOperation {
     };
     parameter_schemas?: Record<string, any>;
   };
-  created_at: string;
-  updated_at: string;
+  // Note: API response may not include these fields for single operations
+  last_updated?: string;
+  created_at?: string;
+  updated_at?: string;
 }
