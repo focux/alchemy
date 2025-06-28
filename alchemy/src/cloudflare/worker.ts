@@ -66,6 +66,8 @@ import {
 } from "./queue-consumer.ts";
 import { type QueueResource, isQueue } from "./queue.ts";
 import { Route } from "./route.ts";
+import { DnsRecords } from "./dns-records.ts";
+import { getZoneByDomain } from "./zone.ts";
 import { isVectorizeIndex } from "./vectorize-index.ts";
 import { type AssetUploadResult, uploadAssets } from "./worker-assets.ts";
 import {
@@ -1466,6 +1468,11 @@ export const _Worker = Resource(
       );
     }
 
+    // Check DNS records for worker routes and create missing ones
+    if (createdRoutes && createdRoutes.length > 0) {
+      await ensureDnsRecordsForRoutes(api, createdRoutes);
+    }
+
     function exportBindings() {
       return Object.fromEntries(
         Object.entries(props.bindings ?? ({} as B)).map(
@@ -1934,6 +1941,129 @@ export async function getWorkerScriptMetadata(
     );
   }
   return ((await response.json()) as any).result as WorkerScriptMetadata;
+}
+
+/**
+ * Extract domain from a route pattern
+ * @param pattern The route pattern (e.g., "api.example.com/*", "*.example.com/api/*")
+ * @returns The domain part of the pattern
+ */
+function extractDomainFromPattern(pattern: string): string {
+  // Remove protocol if present
+  let domain = pattern.replace(/^https?:\/\//, "");
+
+  // Remove path part (everything after the first '/')
+  domain = domain.split("/")[0];
+
+  // Remove port if present
+  domain = domain.split(":")[0];
+
+  return domain;
+}
+
+/**
+ * Check and create DNS records for worker routes to ensure proper routing
+ * @param api CloudflareApi instance
+ * @param routes Array of created routes
+ */
+async function ensureDnsRecordsForRoutes(
+  api: CloudflareApi,
+  routes: Route[],
+): Promise<void> {
+  // Extract unique domains from all route patterns
+  const domains = Array.from(
+    new Set(
+      routes.map((route) => {
+        const domain = extractDomainFromPattern(route.pattern);
+        // Handle wildcard domains by removing the wildcard part
+        return domain.replace(/^\*\./, "");
+      }),
+    ),
+  );
+
+  for (const domain of domains) {
+    try {
+      await ensureDnsRecordForDomain(api, domain);
+    } catch (error) {
+      logger.error(`Failed to check DNS record for domain ${domain}:`, error);
+    }
+  }
+}
+
+/**
+ * Check and create DNS record for a specific domain
+ * @param api CloudflareApi instance
+ * @param domain The domain to check
+ */
+async function ensureDnsRecordForDomain(
+  api: CloudflareApi,
+  domain: string,
+): Promise<void> {
+  // Find the zone for this domain
+  const zone = await getZoneByDomain(api, domain);
+  if (!zone) {
+    logger.warn(
+      `No Cloudflare zone found for domain ${domain}, skipping DNS check`,
+    );
+    return;
+  }
+
+  // Check if DNS record exists for this domain
+  const response = await api.get(
+    `/zones/${zone.id}/dns_records?name=${encodeURIComponent(domain)}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to check DNS records for ${domain}: ${response.statusText}`,
+    );
+  }
+
+  const dnsData = (await response.json()) as {
+    result: Array<{
+      id: string;
+      name: string;
+      type: string;
+      content: string;
+      proxied: boolean;
+    }>;
+  };
+
+  const existingRecords = dnsData.result;
+
+  // Check if there's any record that covers this subdomain
+  const hasRecord = existingRecords.some((record) => record.name === domain);
+
+  if (hasRecord) {
+    // Check if any existing records are not proxied
+    const nonProxiedRecords = existingRecords.filter(
+      (record) => record.name === domain && !record.proxied,
+    );
+
+    if (nonProxiedRecords.length > 0) {
+      logger.warn(
+        `DNS record for ${domain} exists but is not proxied. Worker routes require proxied DNS records to function properly.`,
+      );
+    }
+  } else {
+    // No record exists, create AAAA record pointing to 100::
+    logger.log(`Creating DNS record for ${domain} to enable worker routing`);
+
+    await DnsRecords(`${domain}-worker-dns`, {
+      zoneId: zone.id,
+      records: [
+        {
+          name: domain,
+          type: "AAAA",
+          content: "100::",
+          proxied: true,
+          ttl: 1,
+        },
+      ],
+    });
+
+    logger.log(`Created proxied AAAA record for ${domain} pointing to 100::`);
+  }
 }
 
 /**
