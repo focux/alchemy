@@ -106,6 +106,11 @@ const router = t.router({
             .string()
             .optional()
             .describe("Specify which stage/environment to target"),
+          watch: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe("Watch for file changes and redeploy automatically"),
         })
         .optional()
         .default({}),
