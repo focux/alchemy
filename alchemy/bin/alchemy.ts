@@ -2,6 +2,7 @@
 
 import { createCli, trpcServer, zod as z } from "trpc-cli";
 import { createAlchemy } from "./commands/create.ts";
+import { deployAlchemy } from "./commands/deploy.ts";
 import { getPackageVersion } from "./services/get-package-version.ts";
 import {
   PackageManagerSchema,
@@ -72,6 +73,45 @@ const router = t.router({
         yes: isTest || options.yes,
       };
       await createAlchemy(combinedInput);
+    }),
+  deploy: t.procedure
+    .meta({
+      description: "Deploy an Alchemy project",
+    })
+    .input(
+      z
+        .object({
+          path: z
+            .string()
+            .optional()
+            .describe(
+              "Path to the project directory (defaults to current directory)",
+            ),
+          quiet: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe("Suppress Create/Update/Delete messages"),
+          read: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe("Read-only mode - doesn't modify resources"),
+          destroy: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe("Destroy all resources"),
+          stage: z
+            .string()
+            .optional()
+            .describe("Specify which stage/environment to target"),
+        })
+        .optional()
+        .default({}),
+    )
+    .mutation(async ({ input }) => {
+      await deployAlchemy(input);
     }),
 });
 
