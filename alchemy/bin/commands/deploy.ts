@@ -68,6 +68,9 @@ export async function deployAlchemy(input: DeployInput = {}) {
     case "bun":
       command = `bun ${runFile} ${argsString}`;
       break;
+    case "deno":
+      command = `deno run -A ${runFile} ${argsString}`;
+      break;
     case "pnpm":
       command = isTypeScript
         ? `pnpm tsx ${runFile} ${argsString}`

@@ -55,6 +55,11 @@ const router = t.router({
               .optional()
               .default(false)
               .describe("Use Yarn as the package manager"),
+            deno: z
+              .boolean()
+              .optional()
+              .default(false)
+              .describe("Use Deno as the package manager"),
             install: z
               .boolean()
               .optional()
