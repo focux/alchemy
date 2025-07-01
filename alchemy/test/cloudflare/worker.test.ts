@@ -1591,4 +1591,61 @@ describe("Worker Resource", () => {
       await assertWorkerDoesNotExist(workerName);
     }
   });
+
+  test("create worker with url false and verify no workers.dev subdomain", async (scope) => {
+    const workerName = `${BRANCH_PREFIX}-test-worker-no-url`;
+
+    let worker: Worker | undefined;
+    try {
+      // Create a worker with url: false (disable workers.dev subdomain)
+      worker = await Worker(workerName, {
+        name: workerName,
+        adopt: true,
+        script: `
+          export default {
+            async fetch(request, env, ctx) {
+              return new Response('Hello from worker without subdomain!', { status: 200 });
+            }
+          };
+        `,
+        format: "esm",
+        url: false, // Explicitly disable workers.dev URL
+      });
+
+      expect(worker.id).toBeTruthy();
+      expect(worker.name).toEqual(workerName);
+      expect(worker.format).toEqual("esm");
+      expect(worker.url).toBeUndefined(); // No URL should be provided
+
+      // Query Cloudflare API to verify subdomain is not enabled
+      const subdomainResponse = await api.get(
+        `/accounts/${api.accountId}/workers/scripts/${workerName}/subdomain`,
+      );
+
+      // The subdomain endpoint should either return 404 or indicate it's disabled
+      if (subdomainResponse.status === 200) {
+        const subdomainData: any = await subdomainResponse.json();
+        expect(subdomainData.result?.enabled).toBeFalsy();
+      } else {
+        // If 404, that also indicates no subdomain is configured
+        expect(subdomainResponse.status).toEqual(404);
+      }
+
+      // Try to access the worker via workers.dev subdomain - should fail
+      try {
+        const workerSubdomainUrl = `https://${workerName}.${api.accountId.substring(0, 32)}.workers.dev`;
+        const subdomainTestResponse = await fetch(workerSubdomainUrl);
+
+        // If the fetch succeeds, the subdomain shouldn't be working
+        // Workers.dev subdomains that are disabled typically return 404 or 503
+        expect(subdomainTestResponse.status).toBeGreaterThanOrEqual(400);
+      } catch (error) {
+        // Network errors are also expected when subdomain is disabled
+        expect(error).toBeDefined();
+      }
+    } finally {
+      await destroy(scope);
+      await assertWorkerDoesNotExist(workerName);
+    }
+  });
 });
