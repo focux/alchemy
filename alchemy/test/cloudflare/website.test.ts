@@ -6,6 +6,7 @@ import { createCloudflareApi } from "../../src/cloudflare/api.ts";
 import { Website } from "../../src/cloudflare/website.ts";
 import { destroy } from "../../src/destroy.ts";
 import { BRANCH_PREFIX } from "../util.ts";
+import { assertWorkerDoesNotExist } from "./test-helpers.ts";
 
 import "../../src/test/vitest.ts";
 
@@ -15,19 +16,6 @@ const test = alchemy.test(import.meta, {
 
 // Create a Cloudflare API client for verification
 const api = await createCloudflareApi();
-
-// Helper function to check if a worker exists
-async function assertWorkerDoesNotExist(workerName: string) {
-  try {
-    const response = await api.get(
-      `/accounts/${api.accountId}/workers/scripts/${workerName}`,
-    );
-    expect(response.status).toEqual(404);
-  } catch {
-    // 404 is expected, so we can ignore it
-    return;
-  }
-}
 
 describe("Website Resource", () => {
   test("create website with url false and verify no workers.dev subdomain", async (scope) => {
@@ -97,7 +85,7 @@ describe("Website Resource", () => {
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
       await destroy(scope);
-      await assertWorkerDoesNotExist(name);
+      await assertWorkerDoesNotExist(api, name);
     }
   });
 
