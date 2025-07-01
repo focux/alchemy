@@ -129,6 +129,7 @@
     "@swc/core": "^1.11.24",
     "aws4fetch": "^1.0.20",
     "diff": "^8.0.2",
+    "effect": "^3.16.10",
     "esbuild": "^0.25.1",
     "fast-json-patch": "^3.1.1",
     "glob": "^10.0.0",
