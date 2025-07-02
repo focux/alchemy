@@ -103,6 +103,10 @@
       "bun": "./src/web/shadcn.ts",
       "import": "./lib/web/shadcn.js"
     },
+    "./turso": {
+      "bun": "./src/turso-effect/index.ts",
+      "import": "./lib/turso-effect/index.js"
+    },
     "./web/astro": {
       "bun": "./src/web/astro.ts",
       "import": "./lib/web/astro.js"
@@ -124,6 +128,7 @@
     "@aws-sdk/credential-providers": "^3.0.0",
     "@cloudflare/unenv-preset": "^2.3.1",
     "@cloudflare/workers-shared": "^0.17.5",
+    "@effect/platform": "^0.87.1",
     "@iarna/toml": "^2.2.5",
     "@smithy/node-config-provider": "^4.0.0",
     "@swc/core": "^1.11.24",

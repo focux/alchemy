@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
-import { EffectResource } from "./effect-resource.ts";
+import type { Handlers } from "./effect-resource.ts";
+import { TursoClient } from "./turso-http-api.ts";
 
 export interface ApiTokenProps {
   /**
@@ -29,21 +30,31 @@ export interface ApiToken extends Resource<"turso::api-token"> {
   token?: string;
 }
 
-export const ApiToken = EffectResource<
+export const ApiToken = TursoClient.Resource(
   "turso::api-token",
-  ApiTokenProps,
-  ApiToken
->("turso::api-token", {
-  create: ({ id, props }) => {
-    return Effect.succeed({ id, props, name: props.name, token: undefined });
-  },
-  diff: ({ props, resource }) => {
-    return Effect.succeed(props.name !== resource.name ? "replace" : "update");
-  },
-  update: () => {
-    return Effect.dieMessage("Update not supported for API tokens");
-  },
-  destroy: ({ id, resource }) => {
-    return Effect.succeed(undefined);
-  },
-});
+  Effect.gen(function* () {
+    const client = yield* TursoClient;
+    return {
+      create: ({ props }) =>
+        client.tokens.create({
+          path: {
+            name: props.name,
+          },
+        }),
+      diff: ({ props, resource }) => {
+        return Effect.succeed(
+          props.name !== resource.name ? "replace" : "update",
+        );
+      },
+      update: () => {
+        return Effect.dieMessage("Update not supported for API tokens");
+      },
+      destroy: ({ resource }) =>
+        client.tokens.revoke({
+          path: {
+            name: resource.name,
+          },
+        }),
+    } satisfies Handlers<ApiTokenProps, ApiToken>;
+  }),
+);

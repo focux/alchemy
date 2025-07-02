@@ -8,8 +8,13 @@ import {
   R2Bucket,
   Worker,
 } from "alchemy/cloudflare";
+import { ApiToken } from "alchemy/turso";
 
 const app = await alchemy("cloudflare-worker-simple");
+
+const token = await ApiToken("test", {
+  name: "test-token",
+});
 
 const [d1, kv, r2] = await Promise.all([
   D1Database("my-d1", { adopt: true }),
