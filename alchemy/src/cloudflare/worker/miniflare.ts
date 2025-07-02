@@ -6,7 +6,7 @@ import type {
 } from "miniflare";
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { getAvailablePort } from "../../util/find-free-port.ts";
+import { findOpenPort } from "../../util/find-open-port.ts";
 import { logger } from "../../util/logger.ts";
 import { HTTPServer } from "./http-server.ts";
 import {
@@ -88,7 +88,7 @@ class MiniflareServer {
       return existing;
     }
     const server = new HTTPServer({
-      port: worker.port ?? (await getAvailablePort()),
+      port: worker.port ?? (await findOpenPort()),
       fetch: this.createRequestHandler(worker.name as string),
     });
 
@@ -233,7 +233,7 @@ class MiniflareServer {
 
   private async miniflareOptions(): Promise<MiniflareOptions> {
     const { getDefaultDevRegistryPath } = await import("miniflare");
-    this.inspectorPort = this.inspectorPort ?? (await getAvailablePort());
+    this.inspectorPort = this.inspectorPort ?? (await findOpenPort());
     const options = {
       workers: Array.from(this.workers.values()),
       defaultPersistRoot: path.join(process.cwd(), ".alchemy/miniflare"),
