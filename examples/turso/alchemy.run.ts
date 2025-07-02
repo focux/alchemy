@@ -13,16 +13,14 @@ console.log(token);
 
 const group = await Group("test-group", {
   name: "test-group",
-  location: "aws-us-east-1",
-  organization: "john-royal",
+  location: "aws-eu-west-1",
 });
 
 console.log(group);
 
 const database = await Database("test-database", {
   name: "test-database",
-  group: group,
-  organization: "john-royal",
+  group,
 });
 
 console.log(database);

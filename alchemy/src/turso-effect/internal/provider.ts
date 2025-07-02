@@ -14,7 +14,7 @@ export const createTursoProvider = Effect.fn(function* (token?: string) {
   if (!token) {
     token = yield* getToken;
   }
-  return yield* HttpApiClient.make(Turso.API, {
+  const api = yield* HttpApiClient.make(Turso.API, {
     baseUrl: "https://api.turso.tech",
     transformClient: (client) =>
       client.pipe(
@@ -29,6 +29,12 @@ export const createTursoProvider = Effect.fn(function* (token?: string) {
         //   }),
         // ),
       ),
+  });
+  const defaultOrganization = yield* Effect.cached(
+    api.organizations.list().pipe(Effect.map((orgs) => orgs[0].slug)),
+  );
+  return Object.assign(api, {
+    defaultOrganization,
   });
 });
 

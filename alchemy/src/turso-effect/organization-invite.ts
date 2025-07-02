@@ -19,7 +19,7 @@ export interface OrganizationInviteProps {
    * The organization to invite the user to.
    * @default "default"
    */
-  organization: string;
+  organization?: string;
 }
 
 export interface OrganizationInvite
@@ -42,9 +42,11 @@ export const OrganizationInvite = TursoResource<
 >("turso::organization-invite", {
   create: Effect.fn(function* (ctx) {
     const turso = yield* TursoProvider;
+    const organization =
+      ctx.props.organization ?? (yield* turso.defaultOrganization);
     const { invite } = yield* turso.invites.create({
       path: {
-        organization: ctx.props.organization,
+        organization,
       },
       payload: {
         email: ctx.props.email,
@@ -65,10 +67,12 @@ export const OrganizationInvite = TursoResource<
   }),
   delete: Effect.fn(function* (ctx) {
     const turso = yield* TursoProvider;
+    const organization =
+      ctx.props.organization ?? (yield* turso.defaultOrganization);
     yield* turso.invites
       .delete({
         path: {
-          organization: ctx.props.organization,
+          organization,
           email: ctx.resource.email,
         },
       })

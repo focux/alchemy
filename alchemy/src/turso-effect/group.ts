@@ -2,24 +2,15 @@ import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
 import { TursoProvider } from "./internal/provider.ts";
 import { TursoResource } from "./internal/resource.ts";
+import type { Turso } from "./internal/turso-api.ts";
+import type { APIError } from "./internal/turso-error.ts";
 import { TursoError } from "./turso-http-api.ts";
 
 export interface GroupProps {
   name: string;
   location: string;
-  extensions?: (
-    | "vector"
-    | "crypto"
-    | "fuzzy"
-    | "math"
-    | "stats"
-    | "text"
-    | "unicode"
-    | "uuid"
-    | "regexp"
-    | "vec"
-  )[];
-  organization: string;
+  extensions?: Turso.ExtensionsParam;
+  organization?: string;
   configuration?: {
     delete_protection: boolean;
   };
@@ -41,9 +32,11 @@ export const Group = TursoResource<"turso::group", GroupProps, Group>(
   {
     create: Effect.fn(function* ({ props }) {
       const turso = yield* TursoProvider;
+      const organization =
+        props.organization ?? (yield* turso.defaultOrganization);
       const response = yield* turso.groups
         .create({
-          path: { organization: props.organization },
+          path: { organization },
           payload: {
             name: props.name,
             location: props.location,
@@ -51,25 +44,28 @@ export const Group = TursoResource<"turso::group", GroupProps, Group>(
           },
         })
         .pipe(
-          Effect.catchTag("Conflict", (cause) =>
-            Effect.fail(
-              new TursoError({
-                message: `Group "${props.name}" already exists in organization "${props.organization}".`,
-                status: 409,
-                cause,
-              }),
-            ),
-          ),
+          Effect.catchTags({
+            BadRequest: (cause) =>
+              maybeRewriteInvalidLocation(cause, props.location),
+            Conflict: (cause) =>
+              Effect.fail(
+                new TursoError({
+                  message: `Group "${props.name}" already exists in organization "${organization}".`,
+                  status: 409,
+                  cause,
+                }),
+              ),
+          }),
         );
       const configuration = props.configuration
         ? yield* turso.groups.patchConfiguration({
-            path: { organization: props.organization, group: props.name },
+            path: { organization, group: props.name },
             payload: props.configuration,
           })
         : undefined;
       return {
         name: response.group.name,
-        organization: props.organization,
+        organization,
         version: response.group.version,
         locations: response.group.locations as string[],
         primary: response.group.primary,
@@ -122,3 +118,22 @@ export const Group = TursoResource<"turso::group", GroupProps, Group>(
     }),
   },
 );
+
+const maybeRewriteInvalidLocation = Effect.fn(function* (
+  error: APIError<"BadRequest">,
+  location: string,
+) {
+  if (!error.error.match("invalid location")) {
+    return yield* Effect.fail(error);
+  }
+  const turso = yield* TursoProvider;
+  const locations = yield* turso.locations.list().pipe(
+    Effect.map((res) => Object.keys(res.locations)),
+    Effect.orElseFail(() => error),
+  );
+  return yield* new TursoError({
+    message: `Invalid location: ${location}. Available locations: ${locations.join(", ")}`,
+    status: 400,
+    cause: error,
+  });
+});

@@ -74,6 +74,7 @@ export namespace Turso {
     Extension,
     Schema.Array(Extension),
   );
+  export type ExtensionsParam = typeof ExtensionsParam.Type;
 
   export const GroupPayload = Schema.Struct({
     name: Schema.String,
@@ -262,6 +263,39 @@ export namespace Turso {
         .addSuccess(AuthTokenResponse),
     );
 
+  export const ListLocationsResponse = Schema.Struct({
+    locations: Schema.Record({
+      key: Schema.String,
+      value: Schema.String,
+    }),
+  });
+
+  const LocationsAPI = HttpApiGroup.make("locations").add(
+    HttpApiEndpoint.get("list", "/v1/locations").addSuccess(
+      ListLocationsResponse,
+    ),
+  );
+
+  export const ListOrganizationsResponse = Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      slug: Schema.String,
+      type: Schema.Literal("personal", "team"),
+      overages: Schema.Boolean,
+      blocked_reads: Schema.Boolean,
+      blocked_writes: Schema.Boolean,
+      plan_id: Schema.String,
+      plan_timeline: Schema.optional(Schema.String),
+      platform: Schema.optional(Schema.String),
+    }),
+  );
+
+  const OrganizationsAPI = HttpApiGroup.make("organizations").add(
+    HttpApiEndpoint.get("list", "/v1/organizations").addSuccess(
+      ListOrganizationsResponse,
+    ),
+  );
+
   export const OrganizationMemberParams = Schema.Struct({
     organization: Schema.String,
     username: Schema.String,
@@ -378,5 +412,7 @@ export namespace Turso {
     .add(GroupsAPI)
     .add(DatabasesAPI)
     .add(OrganizationMembersAPI)
-    .add(OrganizationInvitesAPI);
+    .add(OrganizationInvitesAPI)
+    .add(OrganizationsAPI)
+    .add(LocationsAPI);
 }

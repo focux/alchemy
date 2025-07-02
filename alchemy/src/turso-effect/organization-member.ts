@@ -21,7 +21,7 @@ export interface OrganizationMemberProps {
    * The organization to add the member to.
    * @default "default"
    */
-  organization: string;
+  organization?: string;
 }
 
 export interface OrganizationMember
@@ -49,10 +49,12 @@ export const OrganizationMember = TursoResource<
 >("turso::organization-member", {
   create: Effect.fn(function* (ctx) {
     const turso = yield* TursoProvider;
+    const organization =
+      ctx.props.organization ?? (yield* turso.defaultOrganization);
     yield* turso.members
       .create({
         path: {
-          organization: ctx.props.organization,
+          organization,
         },
         payload: {
           username: ctx.props.username,
@@ -75,7 +77,7 @@ export const OrganizationMember = TursoResource<
       );
     const { member } = yield* turso.members.get({
       path: {
-        organization: ctx.props.organization,
+        organization,
         username: ctx.props.username,
       },
     });
@@ -90,9 +92,11 @@ export const OrganizationMember = TursoResource<
     }),
   update: Effect.fn(function* (ctx) {
     const turso = yield* TursoProvider;
+    const organization =
+      ctx.props.organization ?? (yield* turso.defaultOrganization);
     const { member } = yield* turso.members.patchRole({
       path: {
-        organization: ctx.props.organization,
+        organization,
         username: ctx.props.username,
       },
       payload: {
@@ -103,10 +107,12 @@ export const OrganizationMember = TursoResource<
   }),
   delete: Effect.fn(function* (ctx) {
     const turso = yield* TursoProvider;
+    const organization =
+      ctx.props.organization ?? (yield* turso.defaultOrganization);
     yield* turso.members
       .delete({
         path: {
-          organization: ctx.props.organization,
+          organization,
           username: ctx.resource.username,
         },
       })

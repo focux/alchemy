@@ -58,7 +58,7 @@ export const ApiToken = TursoResource<
     yield* turso.tokens
       .revoke({
         path: {
-          name: ctx.resource.name,
+          name: ctx.resource.name ?? ctx.props.name,
         },
       })
       .pipe(Effect.catchTag("NotFound", () => Effect.succeedNone));
