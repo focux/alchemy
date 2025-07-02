@@ -1,8 +1,8 @@
 import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
 import { Secret } from "../secret.ts";
-import type { Handlers } from "./effect-resource.ts";
-import { TursoClient } from "./turso-http-api.ts";
+import { TursoProvider } from "./internal/provider.ts";
+import { TursoResource } from "./internal/resource.ts";
 
 export interface ApiTokenProps {
   /**
@@ -29,42 +29,38 @@ export interface ApiToken extends Resource<"turso::api-token"> {
   token: Secret<string>;
 }
 
-export const ApiToken = TursoClient.Resource(
+export const ApiToken = TursoResource<
   "turso::api-token",
-  Effect.gen(function* () {
-    const client = yield* TursoClient;
-
+  ApiTokenProps,
+  ApiToken
+>("turso::api-token", {
+  create: Effect.fn(function* (ctx) {
+    const turso = yield* TursoProvider;
+    const token = yield* turso.tokens.create({
+      path: {
+        name: ctx.props.name,
+      },
+    });
     return {
-      create: ({ props }) =>
-        client.tokens
-          .create({
-            path: {
-              name: props.name,
-            },
-          })
-          .pipe(
-            Effect.map((response) => ({
-              id: response.id,
-              name: response.name,
-              token: new Secret(response.token),
-            })),
-          ),
-      diff: ({ props, resource }) => {
-        return Effect.succeed(
-          props.name !== resource.name ? "replace" : "update",
-        );
-      },
-      update: () => {
-        return Effect.dieMessage("Update not supported for API tokens");
-      },
-      destroy: ({ resource }) =>
-        client.tokens
-          .revoke({
-            path: {
-              name: resource.name,
-            },
-          })
-          .pipe(Effect.catchTag("NotFound", () => Effect.succeedNone)),
-    } satisfies Handlers<ApiTokenProps, ApiToken>;
+      id: token.id,
+      name: token.name,
+      token: new Secret(token.token),
+    };
   }),
-);
+  diff: ({ props, resource }) => {
+    return Effect.succeed(props.name !== resource.name ? "replace" : "update");
+  },
+  update: () => {
+    return Effect.dieMessage("Update not supported for API tokens");
+  },
+  delete: Effect.fn(function* (ctx) {
+    const turso = yield* TursoProvider;
+    yield* turso.tokens
+      .revoke({
+        path: {
+          name: ctx.resource.name,
+        },
+      })
+      .pipe(Effect.catchTag("NotFound", () => Effect.succeedNone));
+  }),
+});
