@@ -1,46 +1,55 @@
 /// <reference types="@types/node" />
 
 import alchemy from "alchemy";
-import {
-  ApiToken,
-  Database,
-  DatabaseAuthToken,
-  Group,
-  GroupAuthToken,
-} from "alchemy/turso";
+import { ApiToken, Database, DatabaseAuthToken, Group } from "alchemy/turso";
 
 const app = await alchemy("example-turso");
 
-const token = await ApiToken("test-token", {
-  name: "test-token",
+// Create an API token for programmatic access
+const apiToken = await ApiToken("main-token", {
+  name: "example-api-token",
 });
 
-console.log(token);
-
-const group = await Group("test-group", {
-  name: "test-group",
-  location: "aws-eu-west-1",
+// Create a multi-region group for global distribution
+const globalGroup = await Group("global", {
+  locations: ["iad", "lhr"],
+  primary: "iad",
 });
 
-console.log(group);
-
-const groupToken = await GroupAuthToken("test-group-token", {
-  group,
+// Create a production database
+const productionDb = await Database("production", {
+  group: globalGroup,
+  size_limit: "1GB",
 });
 
-console.log(groupToken);
-
-const database = await Database("test-database", {
-  name: "test-database",
-  group,
+// Create a database auth token for connecting to the database
+const prodAuthToken = await DatabaseAuthToken("prod-token", {
+  database: productionDb,
+  expiration: "never",
+  authorization: "full-access",
 });
 
-console.log(database);
-
-const databaseToken = await DatabaseAuthToken("test-database-token", {
-  database,
+// Create a development database in the default group
+const devDb = await Database("development", {
+  group: "default",
 });
 
-console.log(databaseToken);
+// Create a development auth token
+const devAuthToken = await DatabaseAuthToken("dev-token", {
+  database: devDb,
+});
+
+// Output connection details
+console.log({
+  apiToken: apiToken.token,
+  production: {
+    url: `https://${productionDb.Hostname}`,
+    authToken: prodAuthToken.jwt,
+  },
+  development: {
+    url: `https://${devDb.Hostname}`,
+    authToken: devAuthToken.jwt,
+  },
+});
 
 await app.finalize();

@@ -1,4 +1,4 @@
-import { assertContext } from "../context.ts";
+// No imports needed for environment variables
 
 export class TursoApiError extends Error {
   constructor(
@@ -58,7 +58,7 @@ export class TursoApi {
 
     try {
       responseData = responseText ? JSON.parse(responseText) : null;
-    } catch (e) {
+    } catch (_e) {
       if (!response.ok) {
         throw new TursoApiError(
           `API request failed: ${response.statusText}`,
@@ -109,8 +109,7 @@ export function getTursoApi(forceNew = false): TursoApi {
 }
 
 export function assertOrganizationSlug(): string {
-  const ctx = assertContext();
-  const slug = ctx.env.TURSO_ORGANIZATION_SLUG;
+  const slug = process.env.TURSO_ORGANIZATION_SLUG;
   if (!slug) {
     throw new Error(
       "TURSO_ORGANIZATION_SLUG environment variable is required. " +
