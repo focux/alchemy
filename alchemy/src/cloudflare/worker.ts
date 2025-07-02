@@ -329,6 +329,12 @@ export interface BaseWorkerProps<
          */
         port?: number;
         /**
+         * Whether to log to the console.
+         *
+         * @default true
+         */
+        logToConsole?: boolean;
+        /**
          * EXPERIMENTAL: Whether to run the worker remotely instead of locally.
          *
          * When this is enabled, hot reloading will not work.
@@ -1013,6 +1019,10 @@ export const _Worker = Resource(
         compatibilityFlags,
         bindings: props.bindings ?? ({} as B),
         port: typeof props.dev === "object" ? props.dev.port : undefined,
+        logToConsole:
+          typeof props.dev === "object"
+            ? (props.dev?.logToConsole ?? true)
+            : true,
       };
 
       let url: string;

@@ -5,7 +5,9 @@ import type {
   WorkerOptions,
 } from "miniflare";
 import path from "node:path";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
+import { parseConsoleAPICall } from "../../util/chrome-devtools/parse-console-api-called.ts";
+import { colorize } from "../../util/cli.ts";
 import { findOpenPort } from "../../util/find-open-port.ts";
 import { logger } from "../../util/logger.ts";
 import { HTTPServer } from "./http-server.ts";
@@ -101,42 +103,84 @@ class MiniflareServer {
     return server;
   }
 
-  private setupInspectorWebSocketProxy(server: HTTPServer, worker: any) {
+  private setupInspectorWebSocketProxy(
+    server: HTTPServer,
+    worker: MiniflareWorkerOptions,
+  ) {
     const wss = new WebSocketServer({
       server: server.server,
     });
 
     const inspectorUrl = `ws://localhost:${this.inspectorPort}/${worker.name}`;
 
-    wss.on("connection", function connection(clientWs) {
-      const inspectorWs = new WebSocket(inspectorUrl);
+    setTimeout(() => {
+      let inspectorWs = new WebSocket(inspectorUrl);
+      let clients: Array<WsWebSocket> = [];
 
-      inspectorWs.onmessage = (event) => {
-        clientWs.send(event.data);
+      const assignInspector = () => {
+        //* we need these to make sure our proxy actually acts as an inspector
+        const spawnMessages = [
+          `{"id":1,"method":"Network.enable","params":{"maxPostDataSize":65536,"reportDirectSocketTraffic":true}}`,
+          `{"id":2,"method":"Network.setAttachDebugStack","params":{"enabled":true}}`,
+          `{"id":3,"method":"Runtime.enable","params":{}}`,
+          `{"id":4,"method":"Debugger.enable","params":{"maxScriptsCacheSize":10000000}}`,
+          `{"id":5,"method":"Debugger.setPauseOnExceptions","params":{"state":"none"}}`,
+          `{"id":6,"method":"Debugger.setAsyncCallStackDepth","params":{"maxDepth":32}}`,
+          `{"id":7,"method":"Profiler.enable","params":{}}`,
+          `{"id":8,"method":"Network.clearAcceptedEncodingsOverride","params":{}}`,
+          `{"id":9,"method":"Debugger.setBlackboxPatterns","params":{"patterns":["/node_modules/|^node:"],"skipAnonymous":false}}`,
+          `{"id":10,"method":"Runtime.runIfWaitingForDebugger","params":{}}`,
+        ];
+
+        inspectorWs.onmessage = (event) => {
+          const json = JSON.parse(event.data.toString());
+          if (
+            json.method === "Runtime.consoleAPICalled" &&
+            worker.logToConsole
+          ) {
+            //todo(michael): countReset isn't working in the console (works in devtools)
+            parseConsoleAPICall(
+              event.data.toString(),
+              //todo(michael): are we comfortable using cyan here?
+              colorize(`[${worker.name}]`, "cyanBright"),
+            );
+          }
+          clients.forEach((client) => {
+            client.send(event.data);
+          });
+        };
+
+        inspectorWs.onerror = (error) => {
+          console.error(`[${worker.name}]: Inspector crashed:`, error);
+          // clientWs.close();
+        };
+
+        //todo(michael): on rebuild we should reconnect
+        inspectorWs.onclose = () => {};
+
+        inspectorWs.onopen = () => {
+          for (const message of spawnMessages) {
+            inspectorWs.send(message);
+          }
+        };
+
+        wss.on("connection", (clientWs) => {
+          // console.log("clientWs connected", clientWs);
+          clients.push(clientWs);
+
+          clientWs.on("message", function message(data) {
+            const json = JSON.parse(data.toString());
+            if (json.id > 10) {
+              //* we ignore the first 10 messages because they are just setup messages
+              inspectorWs.send(data.toString());
+            }
+          });
+        });
+        //todo(michael): figure out what we're waiting for
+        // (seems to be server ready but also, not really?)
       };
-
-      clientWs.on("message", function message(data) {
-        inspectorWs.send(data.toString());
-      });
-
-      clientWs.on("error", (error) => {
-        console.error(error); //log inspector crashed
-        inspectorWs.close();
-      });
-
-      clientWs.on("close", () => {
-        inspectorWs.close();
-      });
-
-      inspectorWs.onerror = (error) => {
-        console.error(error); //log inspector crashed
-        clientWs.close();
-      };
-
-      inspectorWs.onclose = () => {
-        clientWs.close();
-      };
-    });
+      assignInspector();
+    }, 1000);
   }
 
   private async dispose() {
@@ -247,6 +291,7 @@ class MiniflareServer {
       secretsStorePersist: true,
       workflowsPersist: true,
       inspectorPort: this.inspectorPort,
+      handleRuntimeStdio: () => {},
     };
     return options;
   }

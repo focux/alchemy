@@ -20,6 +20,7 @@ export type MiniflareWorkerOptions = Pick<
   name: string;
   script: string;
   port?: number;
+  logToConsole: boolean;
 };
 
 type BindingType = Exclude<Binding, string | Self>["type"];
