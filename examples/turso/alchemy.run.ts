@@ -1,7 +1,13 @@
 /// <reference types="@types/node" />
 
 import alchemy from "alchemy";
-import { ApiToken, Database, Group } from "alchemy/turso";
+import {
+  ApiToken,
+  Database,
+  DatabaseAuthToken,
+  Group,
+  GroupAuthToken,
+} from "alchemy/turso";
 
 const app = await alchemy("example-turso");
 
@@ -18,11 +24,23 @@ const group = await Group("test-group", {
 
 console.log(group);
 
+const groupToken = await GroupAuthToken("test-group-token", {
+  group,
+});
+
+console.log(groupToken);
+
 const database = await Database("test-database", {
   name: "test-database",
   group,
 });
 
 console.log(database);
+
+const databaseToken = await DatabaseAuthToken("test-database-token", {
+  database,
+});
+
+console.log(databaseToken);
 
 await app.finalize();

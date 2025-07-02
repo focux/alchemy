@@ -37,9 +37,11 @@ export namespace Turso {
   export const AuthTokenPayload = Schema.Struct({
     permissions: Schema.optional(
       Schema.Struct({
-        read_attach: Schema.Struct({
-          databases: Schema.Array(Schema.String),
-        }),
+        read_attach: Schema.optional(
+          Schema.Struct({
+            databases: Schema.Array(Schema.String),
+          }),
+        ),
       }),
     ),
   });
@@ -139,9 +141,10 @@ export namespace Turso {
     .add(
       HttpApiEndpoint.post(
         "createAuthToken",
-        "/v1/organizations/:organization/groups/:group/auth-tokens",
+        "/v1/organizations/:organization/groups/:group/auth/tokens",
       )
         .setPath(GroupParams)
+        .setUrlParams(AuthTokenParams)
         .setPayload(AuthTokenPayload)
         .addSuccess(AuthTokenResponse),
     );
@@ -256,9 +259,10 @@ export namespace Turso {
     .add(
       HttpApiEndpoint.post(
         "createAuthToken",
-        "/v1/organizations/:organization/databases/:database/auth-tokens",
+        "/v1/organizations/:organization/databases/:database/auth/tokens",
       )
         .setPath(DatabaseParams)
+        .setUrlParams(AuthTokenParams)
         .setPayload(AuthTokenPayload)
         .addSuccess(AuthTokenResponse),
     );
