@@ -1,4 +1,4 @@
-import { Cause, Data, Effect } from "effect";
+import { Cause, Effect } from "effect";
 import assert from "node:assert";
 import type { Context } from "../context.ts";
 import { Resource, type ResourceProps } from "../resource.ts";
@@ -39,17 +39,15 @@ export type Factory<
   TProps extends ResourceProps,
   TResource extends Resource<TKind>,
   TError,
-  TDependencies = never,
+  TDependencies,
 > = Effect.Effect<Handlers<TProps, TResource, TError>, never, TDependencies>;
-
-class TestError extends Data.TaggedError("TestError")<{ message: string }> {}
 
 export function EffectResource<
   const TKind extends string,
   TProps extends ResourceProps,
   TResource extends Resource<TKind>,
-  TError,
->(kind: TKind, factory: Factory<TKind, TProps, TResource, TError>) {
+  TError = any,
+>(kind: TKind, factory: Factory<TKind, TProps, TResource, TError, never>) {
   function apply(ctx: Context<TResource, TProps>, id: string, props: TProps) {
     return Effect.gen(function* () {
       const handlers = yield* factory;
@@ -96,9 +94,7 @@ export function EffectResource<
       id: string,
       props: TProps,
     ) {
-      const result = await Effect.runPromiseExit(
-        apply(this, id, props).pipe(Effect.withSpan(`resource.${kind}.${id}`)),
-      );
+      const result = await Effect.runPromiseExit(apply(this, id, props));
       switch (result._tag) {
         case "Success": {
           if (this.phase === "delete") {
@@ -108,11 +104,14 @@ export function EffectResource<
           return this(id, result.value);
         }
         case "Failure": {
-          console.log("failure", result.cause);
-          if (result.cause._tag === "Fail") {
-            console.dir(result.cause.error, { depth: null });
+          const cause = Cause.squash(result.cause);
+          if (cause instanceof Error) {
+            cause.stack = cause.stack?.replaceAll(
+              /.+node_modules\/effect\/.+\n/g,
+              "",
+            );
           }
-          throw Cause.squash(result.cause);
+          throw cause;
         }
       }
     },

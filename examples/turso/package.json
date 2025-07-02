@@ -1,0 +1,13 @@
+{
+  "name": "example-turso",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "bun run ./alchemy.run.ts",
+    "destroy": "bun run ./alchemy.run.ts --destroy"
+  },
+  "dependencies": {
+    "alchemy": "workspace:*"
+  }
+}
