@@ -1,10 +1,12 @@
 import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
-import { TursoProvider } from "./internal/provider.ts";
-import { TursoResource } from "./internal/resource.ts";
-import type { Turso } from "./internal/turso-api.ts";
-import type { APIError } from "./internal/turso-error.ts";
-import { TursoError } from "./turso-http-api.ts";
+import {
+  TursoError,
+  TursoProvider,
+  TursoResource,
+  type APIError,
+  type Turso,
+} from "./internal/index.ts";
 
 export interface GroupProps {
   name: string;

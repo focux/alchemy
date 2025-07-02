@@ -1,9 +1,7 @@
 import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
 import type { Group } from "./group.ts";
-import { TursoProvider } from "./internal/provider.ts";
-import { TursoResource } from "./internal/resource.ts";
-import type { Turso } from "./internal/turso-api.ts";
+import { TursoProvider, TursoResource, type Turso } from "./internal/index.ts";
 
 type DatabaseConfiguration = typeof Turso.DatabaseConfiguration.Type;
 

@@ -1,7 +1,7 @@
 import { Cause, Effect } from "effect";
 import type { Context } from "../../context.ts";
 import { Resource, type ResourceProps } from "../../resource.ts";
-import { TursoError, type TursoErrorCompat } from "../turso-http-api.ts";
+import { TursoError, type TursoErrorCompat } from "./error.ts";
 import {
   BaseRuntime,
   createTursoProvider,

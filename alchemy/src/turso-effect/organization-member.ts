@@ -1,8 +1,6 @@
 import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
-import { TursoProvider } from "./internal/provider.ts";
-import { TursoResource } from "./internal/resource.ts";
-import { TursoError } from "./turso-http-api.ts";
+import { TursoError, TursoProvider, TursoResource } from "./internal/index.ts";
 
 export interface OrganizationMemberProps {
   /**

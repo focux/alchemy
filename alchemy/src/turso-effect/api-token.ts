@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import type { Resource } from "../resource.ts";
 import { Secret } from "../secret.ts";
-import { TursoProvider } from "./internal/provider.ts";
-import { TursoResource } from "./internal/resource.ts";
+import { TursoProvider, TursoResource } from "./internal/index.ts";
 
 export interface ApiTokenProps {
   /**

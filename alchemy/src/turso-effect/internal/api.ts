@@ -1,6 +1,6 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
-import { APIError } from "./turso-error.ts";
+import { APIError } from "./error.ts";
 
 export namespace Turso {
   export const ApiTokenParams = Schema.Struct({

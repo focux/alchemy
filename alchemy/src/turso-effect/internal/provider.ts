@@ -5,8 +5,8 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Turso } from "./api.ts";
 import { getToken } from "./auth.ts";
-import { Turso } from "./turso-api.ts";
 
 type EffectResult<T> = T extends Effect.Effect<infer A, any, any> ? A : never;
 
