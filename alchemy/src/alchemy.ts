@@ -344,7 +344,8 @@ async function _alchemy(
   ].join("\n");
 }
 
-export type Phase = "apply" | "up" | "destroy" | "read";
+export const PhaseOptions = ["apply", "up", "destroy", "read"] as const;
+export type Phase = (typeof PhaseOptions)[number];
 
 export interface AlchemyOptions {
   /**
