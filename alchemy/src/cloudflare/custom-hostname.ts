@@ -646,7 +646,10 @@ function doesCustomHostnameNeedUpdate(
 
       // Check min TLS version
       if (props.ssl.settings.min_tls_version !== undefined) {
-        if (existing.ssl.settings.min_tls_version !== props.ssl.settings.min_tls_version) {
+        if (
+          existing.ssl.settings.min_tls_version !==
+          props.ssl.settings.min_tls_version
+        ) {
           return true;
         }
       }
@@ -656,11 +659,16 @@ function doesCustomHostnameNeedUpdate(
         if (!existing.ssl.settings.ciphers) {
           return true;
         }
-        if (props.ssl.settings.ciphers.length !== existing.ssl.settings.ciphers.length) {
+        if (
+          props.ssl.settings.ciphers.length !==
+          existing.ssl.settings.ciphers.length
+        ) {
           return true;
         }
         for (let i = 0; i < props.ssl.settings.ciphers.length; i++) {
-          if (props.ssl.settings.ciphers[i] !== existing.ssl.settings.ciphers[i]) {
+          if (
+            props.ssl.settings.ciphers[i] !== existing.ssl.settings.ciphers[i]
+          ) {
             return true;
           }
         }
