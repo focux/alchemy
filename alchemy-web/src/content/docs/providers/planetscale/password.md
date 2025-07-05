@@ -23,9 +23,9 @@ const readerPassword = await Password("app-reader", {
 });
 
 // Access connection details
-console.log(`Host: ${readerPassword.password.host}`);
-console.log(`Username: ${readerPassword.password.username}`);
-console.log(`Password: ${readerPassword.password.password.unencrypted}`);
+console.log(`Host: ${readerPassword.host}`);
+console.log(`Username: ${readerPassword.username}`);
+console.log(`Password: ${readerPassword.password.unencrypted}`);
 ```
 
 ## Writer Password with TTL
@@ -200,9 +200,9 @@ const password = await Password("app-db-access", {
 
 // Create MySQL connection
 const connection = await mysql.createConnection({
-  host: password.password.host,
-  user: password.password.username,
-  password: password.password.password.unencrypted,
+  host: password.host,
+  user: password.username,
+  password: password.password.unencrypted,
   database: "my-app-db",
   ssl: { rejectUnauthorized: true }
 });

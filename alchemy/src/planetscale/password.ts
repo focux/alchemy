@@ -3,8 +3,8 @@ import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import type { Secret } from "../secret.ts";
 import { PlanetScaleApi } from "./api.ts";
-import type { Database } from "./database.ts";
 import type { Branch } from "./branch.ts";
+import type { Database } from "./database.ts";
 
 /**
  * Properties for creating or updating a PlanetScale Branch
@@ -77,24 +77,19 @@ export interface Password
   expiresAt: string;
 
   /**
-   * Connection details for the database password
+   * The host URL for database connection
    */
-  password: {
-    /**
-     * The host URL for database connection
-     */
-    host: string;
+  host: string;
 
-    /**
-     * The username for database authentication
-     */
-    username: string;
+  /**
+   * The username for database authentication
+   */
+  username: string;
 
-    /**
-     * The encrypted password for database authentication
-     */
-    password: Secret<string>;
-  };
+  /**
+   * The encrypted password for database authentication
+   */
+  password: Secret<string>;
 }
 
 /**
@@ -107,7 +102,7 @@ export interface Password
  *
  * ```ts
  * import { Password } from "alchemy/planetscale";
- * 
+ *
  * const readerPassword = await Password("app-reader", {
  *   name: "app-reader",
  *   organizationId: "my-org",
@@ -115,7 +110,7 @@ export interface Password
  *   branch: "main",
  *   role: "reader"
  * });
- * 
+ *
  * // Access connection details
  * console.log(`Host: ${readerPassword.password.host}`);
  * console.log(`Username: ${readerPassword.password.username}`);
@@ -129,7 +124,7 @@ export interface Password
  *
  * ```ts
  * import { Password } from "alchemy/planetscale";
- * 
+ *
  * const writerPassword = await Password("app-writer", {
  *   name: "app-writer",
  *   organizationId: "my-org",
@@ -138,7 +133,7 @@ export interface Password
  *   role: "writer",
  *   ttl: 86400 // 24 hours in seconds
  * });
- * 
+ *
  * // Password will expire at the specified time
  * console.log(`Expires at: ${writerPassword.expiresAt}`);
  * ```
@@ -150,7 +145,7 @@ export interface Password
  *
  * ```ts
  * import { Password } from "alchemy/planetscale";
- * 
+ *
  * const adminPassword = await Password("admin-access", {
  *   name: "admin-access",
  *   organizationId: "my-org",
@@ -169,7 +164,7 @@ export interface Password
  *
  * ```ts
  * import { Password } from "alchemy/planetscale";
- * 
+ *
  * const password = await Password("custom-auth", {
  *   name: "custom-auth",
  *   organizationId: "my-org",
@@ -187,7 +182,7 @@ export interface Password
  *
  * ```ts
  * import { Password } from "alchemy/planetscale";
- * 
+ *
  * const replicaPassword = await Password("replica-reader", {
  *   name: "replica-reader",
  *   organizationId: "my-org",
@@ -204,13 +199,13 @@ export interface Password
  *
  * ```ts
  * import { Database, Password } from "alchemy/planetscale";
- * 
+ *
  * const database = await Database("my-db", {
  *   name: "my-app-db",
  *   organizationId: "my-org",
  *   clusterSize: "PS_10"
  * });
- * 
+ *
  * const password = await Password("db-reader", {
  *   name: "db-reader",
  *   database: database, // Using Database resource
@@ -225,13 +220,13 @@ export interface Password
  *
  * ```ts
  * import { Database, Branch, Password } from "alchemy/planetscale";
- * 
+ *
  * const database = await Database("my-db", {
  *   name: "my-app-db",
  *   organizationId: "my-org",
  *   clusterSize: "PS_10"
  * });
- * 
+ *
  * const branch = await Branch("feature-branch", {
  *   name: "feature-branch",
  *   organizationId: "my-org",
@@ -239,7 +234,7 @@ export interface Password
  *   parentBranch: "main",
  *   isProduction: false
  * });
- * 
+ *
  * const password = await Password("feature-writer", {
  *   name: "feature-writer",
  *   database: database, // Using Database resource
@@ -263,13 +258,20 @@ export const Password = Resource(
     }
 
     const api = new PlanetScaleApi({ apiKey });
-    const branchName = props.branchName ?? "main";
+    const branchName =
+      props.branch == null
+        ? "main"
+        : typeof props.branch === "string"
+          ? props.branch
+          : props.branch.name;
+    const databaseName =
+      typeof props.database === "string" ? props.database : props.database.name;
 
     if (this.phase === "delete") {
       try {
         if (this.output?.name) {
           const response = await api.delete(
-            `/organizations/${props.organizationId}/databases/${props.databaseName}/branches/${branchName}/passwords/${this.output.id}`,
+            `/organizations/${props.organizationId}/databases/${databaseName}/branches/${branchName}/passwords/${this.output.id}`,
           );
 
           if (!response.ok && response.status !== 404) {
@@ -299,7 +301,7 @@ export const Password = Resource(
         this.replace();
       }
       const updateResponse = await api.patch(
-        `/organizations/${organizationId}/databases/${databaseName}/branches/${branchName}/passwords/${this.output.id}`,
+        `/organizations/${props.organizationId}/databases/${databaseName}/branches/${branchName}/passwords/${this.output.id}`,
         {
           name: props.name,
           cidrs: props.cidrs,
@@ -320,7 +322,7 @@ export const Password = Resource(
 
     try {
       const createResponse = await api.post(
-        `/organizations/${organizationId}/databases/${databaseName}/branches/${branchName}/passwords`,
+        `/organizations/${props.organizationId}/databases/${databaseName}/branches/${branchName}/passwords`,
         {
           name: props.name,
           role: props.role,
@@ -341,11 +343,9 @@ export const Password = Resource(
       return this({
         id: data.id,
         expiresAt: data.expires_at,
-        password: {
-          host: data.access_host_url,
-          username: data.username,
-          password: alchemy.secret(data.plain_text),
-        },
+        host: data.access_host_url,
+        username: data.username,
+        password: alchemy.secret(data.plain_text),
         ...props,
       });
     } catch (error) {

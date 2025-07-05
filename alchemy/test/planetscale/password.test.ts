@@ -70,9 +70,9 @@ describe.skipIf(!process.env.PLANETSCALE_TEST)("Password Resource", () => {
       expect(password.id).toBeTruthy();
       expect(password.name).toEqual(testId);
       expect(password.role).toEqual("reader");
-      expect(password.password.host).toBeTruthy();
-      expect(password.password.username).toBeTruthy();
-      expect(password.password.password).toBeTruthy();
+      expect(password.host).toBeTruthy();
+      expect(password.username).toBeTruthy();
+      expect(password.password).toBeTruthy();
 
       // Verify password was created by querying the API directly
       const getResponse = await api.get(
