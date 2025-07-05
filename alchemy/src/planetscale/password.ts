@@ -299,11 +299,8 @@ export const Password = Resource(
     }
     if (this.phase === "update") {
       if (
-        // INSERT_YOUR_CODE
         this.output?.name === name &&
-        // Both undefined
         ((this.output?.cidrs === undefined && props.cidrs === undefined) ||
-          // Both arrays and equal
           (Array.isArray(this.output?.cidrs) &&
             Array.isArray(props.cidrs) &&
             this.output.cidrs.length === props.cidrs.length &&
