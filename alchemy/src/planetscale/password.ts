@@ -2,6 +2,8 @@ import { alchemy } from "../alchemy.ts";
 import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import type { Secret } from "../secret.ts";
+import { logger } from "../util/logger.ts";
+import { lowercaseId } from "../util/nanoid.ts";
 import { PlanetScaleApi } from "./api.ts";
 import type { Branch } from "./branch.ts";
 import type { Database } from "./database.ts";
@@ -90,6 +92,11 @@ export interface Password
    * The encrypted password for database authentication
    */
   password: Secret<string>;
+
+  /**
+   * The name slug for the password
+   */
+  nameSlug: string;
 }
 
 /**
@@ -256,6 +263,10 @@ export const Password = Resource(
     if (!apiKey) {
       throw new Error("PLANETSCALE_API_TOKEN environment variable is required");
     }
+    const nameSlug = this.isReplacement
+      ? lowercaseId()
+      : (this.output?.nameSlug ?? lowercaseId());
+    const name = `${props.name.toLowerCase()}-${nameSlug}`;
 
     const api = new PlanetScaleApi({ apiKey });
     const branchName =
@@ -281,7 +292,7 @@ export const Password = Resource(
           }
         }
       } catch (error) {
-        console.error("Error deleting password:", error);
+        logger.error("Error deleting password:", error);
         throw error;
       }
       return this.destroy();
@@ -289,7 +300,7 @@ export const Password = Resource(
     if (this.phase === "update") {
       if (
         // INSERT_YOUR_CODE
-        this.output?.name === props.name &&
+        this.output?.name === name &&
         // Both undefined
         ((this.output?.cidrs === undefined && props.cidrs === undefined) ||
           // Both arrays and equal
@@ -298,12 +309,12 @@ export const Password = Resource(
             this.output.cidrs.length === props.cidrs.length &&
             this.output.cidrs.every((cidr, i) => cidr === props.cidrs![i])))
       ) {
-        this.replace();
+        return this.replace();
       }
       const updateResponse = await api.patch(
         `/organizations/${props.organizationId}/databases/${databaseName}/branches/${branchName}/passwords/${this.output.id}`,
         {
-          name: props.name,
+          name,
           cidrs: props.cidrs,
         },
       );
@@ -324,7 +335,7 @@ export const Password = Resource(
       const createResponse = await api.post(
         `/organizations/${props.organizationId}/databases/${databaseName}/branches/${branchName}/passwords`,
         {
-          name: props.name,
+          name,
           role: props.role,
           replica: props.replica,
           ttl: props.ttl,
@@ -346,10 +357,12 @@ export const Password = Resource(
         host: data.access_host_url,
         username: data.username,
         password: alchemy.secret(data.plain_text),
+        nameSlug,
         ...props,
+        name: `${props.name}-${nameSlug}`,
       });
     } catch (error) {
-      console.error("Error managing password:", error);
+      logger.error("Error managing password:", error);
       throw error;
     }
   },
