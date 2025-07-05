@@ -8,11 +8,12 @@ PlanetScale is a serverless database platform based on MySQL that provides horiz
 
 - [Database](./database.md) - Create and manage PlanetScale databases with configuration options
 - [Branch](./branch.md) - Create and manage database branches for development workflows
+- [Password](./password.md) - Create and manage database passwords with specific roles and permissions
 
 ## Example Usage
 
 ```ts
-import { Database, Branch } from "alchemy/planetscale";
+import { Database, Branch, Password } from "alchemy/planetscale";
 
 // Create a database
 const database = await Database("my-app-db", {
@@ -41,5 +42,23 @@ const prodBranch = await Branch("production", {
   isProduction: true,
   clusterSize: "PS_20",
   backupId: "backup-123"
+});
+
+// Create passwords for database access
+const readerPassword = await Password("app-reader", {
+  name: "app-reader",
+  organizationId: "my-org",
+  databaseName: database.name,
+  branchName: "main",
+  role: "reader"
+});
+
+const writerPassword = await Password("app-writer", {
+  name: "app-writer",
+  organizationId: "my-org",
+  databaseName: database.name,
+  branchName: devBranch.name,
+  role: "writer",
+  ttl: 86400 // 24 hours
 });
 ```

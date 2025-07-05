@@ -91,6 +91,107 @@ export interface Password
   };
 }
 
+/**
+ * Create and manage database passwords for PlanetScale branches. Database passwords provide secure access to your database with specific roles and permissions.
+ *
+ * @example
+ * ## Basic Reader Password
+ *
+ * Create a read-only password for a database branch:
+ *
+ * ```ts
+ * import { Password } from "alchemy/planetscale";
+ * 
+ * const readerPassword = await Password("app-reader", {
+ *   name: "app-reader",
+ *   organizationId: "my-org",
+ *   databaseName: "my-app-db",
+ *   branchName: "main",
+ *   role: "reader"
+ * });
+ * 
+ * // Access connection details
+ * console.log(`Host: ${readerPassword.password.host}`);
+ * console.log(`Username: ${readerPassword.password.username}`);
+ * console.log(`Password: ${readerPassword.password.password.unencrypted}`);
+ * ```
+ *
+ * @example
+ * ## Writer Password with TTL
+ *
+ * Create a writer password that expires after 24 hours:
+ *
+ * ```ts
+ * import { Password } from "alchemy/planetscale";
+ * 
+ * const writerPassword = await Password("app-writer", {
+ *   name: "app-writer",
+ *   organizationId: "my-org",
+ *   databaseName: "my-app-db",
+ *   branchName: "development",
+ *   role: "writer",
+ *   ttl: 86400 // 24 hours in seconds
+ * });
+ * 
+ * // Password will expire at the specified time
+ * console.log(`Expires at: ${writerPassword.expiresAt}`);
+ * ```
+ *
+ * @example
+ * ## Admin Password with IP Restrictions
+ *
+ * Create an admin password that only allows connections from specific IP addresses:
+ *
+ * ```ts
+ * import { Password } from "alchemy/planetscale";
+ * 
+ * const adminPassword = await Password("admin-access", {
+ *   name: "admin-access",
+ *   organizationId: "my-org",
+ *   databaseName: "my-app-db",
+ *   branchName: "main",
+ *   role: "admin",
+ *   cidrs: ["203.0.113.0/24", "198.51.100.0/24"],
+ *   ttl: 3600 // 1 hour
+ * });
+ * ```
+ *
+ * @example
+ * ## Database Password with Custom API Key
+ *
+ * Create a password using a specific API key instead of the default environment variable:
+ *
+ * ```ts
+ * import { Password } from "alchemy/planetscale";
+ * 
+ * const password = await Password("custom-auth", {
+ *   name: "custom-auth",
+ *   organizationId: "my-org",
+ *   databaseName: "my-app-db",
+ *   branchName: "main",
+ *   role: "readwriter",
+ *   apiKey: alchemy.secret(process.env.CUSTOM_PLANETSCALE_TOKEN)
+ * });
+ * ```
+ *
+ * @example
+ * ## Read Replica Password
+ *
+ * Create a password for accessing a read replica:
+ *
+ * ```ts
+ * import { Password } from "alchemy/planetscale";
+ * 
+ * const replicaPassword = await Password("replica-reader", {
+ *   name: "replica-reader",
+ *   organizationId: "my-org",
+ *   databaseName: "my-app-db",
+ *   branchName: "main",
+ *   role: "reader",
+ *   replica: true
+ * });
+ * ```
+ */
 export const Password = Resource(
   "planetscale::Password",
   async function (
