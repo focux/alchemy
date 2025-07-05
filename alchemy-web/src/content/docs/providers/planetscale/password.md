@@ -17,8 +17,8 @@ import { Password } from "alchemy/planetscale";
 const readerPassword = await Password("app-reader", {
   name: "app-reader",
   organizationId: "my-org",
-  databaseName: "my-app-db",
-  branchName: "main",
+  database: "my-app-db",
+  branch: "main",
   role: "reader"
 });
 
@@ -38,8 +38,8 @@ import { Password } from "alchemy/planetscale";
 const writerPassword = await Password("app-writer", {
   name: "app-writer",
   organizationId: "my-org",
-  databaseName: "my-app-db",
-  branchName: "development",
+  database: "my-app-db",
+  branch: "development",
   role: "writer",
   ttl: 86400 // 24 hours in seconds
 });
@@ -58,8 +58,8 @@ import { Password } from "alchemy/planetscale";
 const adminPassword = await Password("admin-access", {
   name: "admin-access",
   organizationId: "my-org",
-  databaseName: "my-app-db",
-  branchName: "main",
+  database: "my-app-db",
+  branch: "main",
   role: "admin",
   cidrs: ["203.0.113.0/24", "198.51.100.0/24"],
   ttl: 3600 // 1 hour
@@ -76,8 +76,8 @@ import { Password } from "alchemy/planetscale";
 const password = await Password("custom-auth", {
   name: "custom-auth",
   organizationId: "my-org",
-  databaseName: "my-app-db",
-  branchName: "main",
+  database: "my-app-db",
+  branch: "main",
   role: "readwriter",
   apiKey: alchemy.secret(process.env.CUSTOM_PLANETSCALE_TOKEN)
 });
@@ -93,8 +93,8 @@ import { Password } from "alchemy/planetscale";
 const replicaPassword = await Password("replica-reader", {
   name: "replica-reader",
   organizationId: "my-org",
-  databaseName: "my-app-db",
-  branchName: "main",
+  database: "my-app-db",
+  branch: "main",
   role: "reader",
   replica: true
 });
@@ -123,22 +123,43 @@ const devBranch = await Branch("feature-123", {
   isProduction: false
 });
 
-// Create passwords for the branch
+// Create passwords using resource instances
 const readerPassword = await Password("dev-reader", {
   name: "dev-reader",
-  organizationId: "my-org",
-  databaseName: database.name,
-  branchName: devBranch.name,
+  database: database, // Using Database resource
+  branch: devBranch, // Using Branch resource
   role: "reader"
 });
 
 const writerPassword = await Password("dev-writer", {
   name: "dev-writer",
-  organizationId: "my-org",
-  databaseName: database.name,
-  branchName: devBranch.name,
+  database: database, // Using Database resource
+  branch: devBranch, // Using Branch resource
   role: "writer",
   ttl: 86400 // 24 hours
+});
+```
+
+## Mixed Resource Usage
+
+You can also mix string identifiers with resource instances:
+
+```ts
+import { Database, Password } from "alchemy/planetscale";
+
+// Create a database resource
+const database = await Database("my-app-db", {
+  name: "my-app-db",
+  organizationId: "my-org",
+  clusterSize: "PS_10"
+});
+
+// Use Database resource with string branch name
+const password = await Password("mixed-example", {
+  name: "mixed-example",
+  database: database, // Using Database resource
+  branch: "main", // Using string branch name
+  role: "reader"
 });
 ```
 
@@ -172,8 +193,8 @@ import mysql from "mysql2/promise";
 const password = await Password("app-db-access", {
   name: "app-db-access",
   organizationId: "my-org",
-  databaseName: "my-app-db",
-  branchName: "main",
+  database: "my-app-db",
+  branch: "main",
   role: "readwriter"
 });
 

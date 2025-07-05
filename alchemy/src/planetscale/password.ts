@@ -3,6 +3,8 @@ import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import type { Secret } from "../secret.ts";
 import { PlanetScaleApi } from "./api.ts";
+import type { Database } from "./database.ts";
+import type { Branch } from "./branch.ts";
 
 /**
  * Properties for creating or updating a PlanetScale Branch
@@ -15,18 +17,22 @@ export interface PasswordProps {
 
   /**
    * The organization ID where the password will be created
+   * Required when using string database name, optional when using Database resource
    */
-  organizationId: string;
+  organizationId?: string;
 
   /**
-   * The database name where the password will be created
+   * The database where the password will be created
+   * Can be either a database name (string) or Database resource
    */
-  databaseName: string;
+  database: string | Database;
 
   /**
-   * The branch name where the password will be created
+   * The branch where the password will be created
+   * Can be either a branch name (string) or Branch resource
+   * Defaults to "main" if not provided
    */
-  branchName?: string;
+  branch?: string | Branch;
 
   /**
    * PlanetScale API token (overrides environment variable)
@@ -105,8 +111,8 @@ export interface Password
  * const readerPassword = await Password("app-reader", {
  *   name: "app-reader",
  *   organizationId: "my-org",
- *   databaseName: "my-app-db",
- *   branchName: "main",
+ *   database: "my-app-db",
+ *   branch: "main",
  *   role: "reader"
  * });
  * 
@@ -127,8 +133,8 @@ export interface Password
  * const writerPassword = await Password("app-writer", {
  *   name: "app-writer",
  *   organizationId: "my-org",
- *   databaseName: "my-app-db",
- *   branchName: "development",
+ *   database: "my-app-db",
+ *   branch: "development",
  *   role: "writer",
  *   ttl: 86400 // 24 hours in seconds
  * });
@@ -148,8 +154,8 @@ export interface Password
  * const adminPassword = await Password("admin-access", {
  *   name: "admin-access",
  *   organizationId: "my-org",
- *   databaseName: "my-app-db",
- *   branchName: "main",
+ *   database: "my-app-db",
+ *   branch: "main",
  *   role: "admin",
  *   cidrs: ["203.0.113.0/24", "198.51.100.0/24"],
  *   ttl: 3600 // 1 hour
@@ -167,8 +173,8 @@ export interface Password
  * const password = await Password("custom-auth", {
  *   name: "custom-auth",
  *   organizationId: "my-org",
- *   databaseName: "my-app-db",
- *   branchName: "main",
+ *   database: "my-app-db",
+ *   branch: "main",
  *   role: "readwriter",
  *   apiKey: alchemy.secret(process.env.CUSTOM_PLANETSCALE_TOKEN)
  * });
@@ -185,11 +191,62 @@ export interface Password
  * const replicaPassword = await Password("replica-reader", {
  *   name: "replica-reader",
  *   organizationId: "my-org",
- *   databaseName: "my-app-db",
- *   branchName: "main",
+ *   database: "my-app-db",
+ *   branch: "main",
  *   role: "reader",
  *   replica: true
  * });
+ *
+ * @example
+ * ## Using Database Resource Instance
+ *
+ * Create a password using a Database resource instead of string:
+ *
+ * ```ts
+ * import { Database, Password } from "alchemy/planetscale";
+ * 
+ * const database = await Database("my-db", {
+ *   name: "my-app-db",
+ *   organizationId: "my-org",
+ *   clusterSize: "PS_10"
+ * });
+ * 
+ * const password = await Password("db-reader", {
+ *   name: "db-reader",
+ *   database: database, // Using Database resource
+ *   role: "reader"
+ * });
+ * ```
+ *
+ * @example
+ * ## Using Both Database and Branch Resources
+ *
+ * Create a password using both Database and Branch resources:
+ *
+ * ```ts
+ * import { Database, Branch, Password } from "alchemy/planetscale";
+ * 
+ * const database = await Database("my-db", {
+ *   name: "my-app-db",
+ *   organizationId: "my-org",
+ *   clusterSize: "PS_10"
+ * });
+ * 
+ * const branch = await Branch("feature-branch", {
+ *   name: "feature-branch",
+ *   organizationId: "my-org",
+ *   databaseName: "my-app-db",
+ *   parentBranch: "main",
+ *   isProduction: false
+ * });
+ * 
+ * const password = await Password("feature-writer", {
+ *   name: "feature-writer",
+ *   database: database, // Using Database resource
+ *   branch: branch, // Using Branch resource
+ *   role: "writer"
+ * });
+ * ```
  * ```
  */
 export const Password = Resource(
@@ -242,7 +299,7 @@ export const Password = Resource(
         this.replace();
       }
       const updateResponse = await api.patch(
-        `/organizations/${props.organizationId}/databases/${props.databaseName}/branches/${branchName}/passwords/${this.output.id}`,
+        `/organizations/${organizationId}/databases/${databaseName}/branches/${branchName}/passwords/${this.output.id}`,
         {
           name: props.name,
           cidrs: props.cidrs,
@@ -263,7 +320,7 @@ export const Password = Resource(
 
     try {
       const createResponse = await api.post(
-        `/organizations/${props.organizationId}/databases/${props.databaseName}/branches/${branchName}/passwords`,
+        `/organizations/${organizationId}/databases/${databaseName}/branches/${branchName}/passwords`,
         {
           name: props.name,
           role: props.role,

@@ -62,8 +62,8 @@ describe.skipIf(!process.env.PLANETSCALE_TEST)("Password Resource", () => {
       let password = await Password(testId, {
         name: testId,
         organizationId,
-        databaseName: testDB.name,
-        branchName: testBranch.name,
+        database: testDB.name,
+        branch: testBranch.name,
         role: "reader",
       });
 
@@ -88,8 +88,8 @@ describe.skipIf(!process.env.PLANETSCALE_TEST)("Password Resource", () => {
       password = await Password(testId, {
         name: `${testId}-updated`,
         organizationId,
-        databaseName: testDB.name,
-        branchName: testBranch.name,
+        database: testDB.name,
+        branch: testBranch.name,
         role: "reader",
       });
 
@@ -116,8 +116,8 @@ describe.skipIf(!process.env.PLANETSCALE_TEST)("Password Resource", () => {
       let password = await Password(testId, {
         name: testId,
         organizationId,
-        databaseName: testDB.name,
-        branchName: testBranch.name,
+        database: testDB.name,
+        branch: testBranch.name,
         role: "reader",
         ttl: 3600,
         cidrs: ["0.0.0.0/0"],
@@ -131,8 +131,8 @@ describe.skipIf(!process.env.PLANETSCALE_TEST)("Password Resource", () => {
       password = await Password(testId, {
         name: testId,
         organizationId,
-        databaseName: testDB.name,
-        branchName: testBranch.name,
+        database: testDB.name,
+        branch: testBranch.name,
         role: "writer", // Changed role
         ttl: 3600,
         cidrs: ["0.0.0.0/0"],
