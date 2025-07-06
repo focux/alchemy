@@ -80,49 +80,6 @@ describe("ResendBroadcast", () => {
       }
     },
   );
-
-  test.skipIf(!process.env.RESEND_API_KEY)(
-    "create scheduled broadcast",
-    async (scope) => {
-      const api = createResendApi();
-      const audienceId = `${BRANCH_PREFIX}-scheduled-audience`;
-      const broadcastId = `${BRANCH_PREFIX}-scheduled-broadcast`;
-      let audience: ResendAudience | undefined;
-      let broadcast: ResendBroadcast | undefined;
-
-      try {
-        // Create audience
-        audience = await ResendAudience(audienceId, {
-          name: `${audienceId} Scheduled Audience`,
-        });
-
-        // Create scheduled broadcast
-        const scheduleDate = new Date(Date.now() + 24 * 60 * 60 * 1000); // Tomorrow
-        broadcast = await ResendBroadcast(broadcastId, {
-          name: "Scheduled Broadcast",
-          subject: "Scheduled Subject",
-          from: "scheduled@example.com",
-          html: "<h1>Scheduled</h1><p>Scheduled content</p>",
-          audience: audience,
-          scheduled_at: scheduleDate.toISOString(),
-        });
-
-        expect(broadcast).toMatchObject({
-          name: "Scheduled Broadcast",
-          subject: "Scheduled Subject",
-          from: "scheduled@example.com",
-          html: "<h1>Scheduled</h1><p>Scheduled content</p>",
-          audience_id: audience.id,
-          scheduled_at: scheduleDate.toISOString(),
-          status: expect.any(String),
-        });
-      } finally {
-        await destroy(scope);
-        await assertBroadcastDoesNotExist(api, broadcast);
-        await assertAudienceDoesNotExist(api, audience);
-      }
-    },
-  );
 });
 
 async function assertBroadcastDoesNotExist(

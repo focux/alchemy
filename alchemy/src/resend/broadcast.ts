@@ -55,12 +55,6 @@ export interface ResendBroadcastProps extends ResendApiOptions {
   audience: string | ResendAudience;
 
   /**
-   * When to send the broadcast (ISO 8601 format)
-   * If not provided, broadcast will be created as draft
-   */
-  scheduled_at?: string;
-
-  /**
    * Existing broadcast ID to update
    * Used internally during update operations
    * @internal
@@ -144,24 +138,6 @@ export interface ResendBroadcast
  * ```
  *
  * @example
- * ## Scheduled Broadcast
- *
- * Create a broadcast scheduled for later:
- *
- * ```ts
- * const broadcast = await ResendBroadcast("announcement", {
- *   name: "Product Launch",
- *   subject: "New Product Launch!",
- *   from: "marketing@example.com",
- *   reply_to: "support@example.com",
- *   html: "<h1>New Product</h1><p>Check out our latest product...</p>",
- *   text: "New Product\n\nCheck out our latest product...",
- *   audience: "aud_123456",
- *   scheduled_at: "2024-12-25T10:00:00Z"
- * });
- * ```
- *
- * @example
  * ## Broadcast with Custom API Key
  *
  * Create a broadcast with a custom API key:
@@ -219,7 +195,6 @@ export const ResendBroadcast = Resource(
           html: props.html,
           text: props.text,
           audience_id: audienceId,
-          scheduled_at: props.scheduled_at,
         });
 
         if (!updateResponse.ok) {
@@ -243,7 +218,6 @@ export const ResendBroadcast = Resource(
                 html: props.html,
                 text: props.text,
                 audience_id: audienceId,
-                scheduled_at: props.scheduled_at,
               },
             );
 
@@ -304,7 +278,6 @@ async function createNewBroadcast(
     html: props.html,
     text: props.text,
     audience_id: audienceId,
-    scheduled_at: props.scheduled_at,
   });
 
   if (!broadcastResponse.ok) {

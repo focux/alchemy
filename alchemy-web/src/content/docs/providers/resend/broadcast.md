@@ -5,7 +5,7 @@ description: Manage email campaigns sent to audiences
 
 # Broadcast
 
-The `ResendBroadcast` resource manages broadcast email campaigns sent to audiences. Broadcasts can be created as drafts, scheduled for later, or sent immediately to specific audiences.
+The `ResendBroadcast` resource manages broadcast email campaigns sent to audiences. Broadcasts are created as drafts and can be updated before sending.
 
 ## Example Usage
 
@@ -30,23 +30,6 @@ const broadcast = await ResendBroadcast("newsletter", {
 
 console.log(`Broadcast ID: ${broadcast.id}`);
 console.log(`Status: ${broadcast.status}`);
-```
-
-### Scheduled Broadcast
-
-Create a broadcast scheduled for later:
-
-```ts
-const broadcast = await ResendBroadcast("announcement", {
-  name: "Product Launch",
-  subject: "New Product Launch!",
-  from: "marketing@example.com",
-  reply_to: "support@example.com",
-  html: "<h1>New Product</h1><p>Check out our latest product...</p>",
-  text: "New Product\n\nCheck out our latest product...",
-  audience: "aud_123456", // Can use audience ID string
-  scheduled_at: "2024-12-25T10:00:00Z"
-});
 ```
 
 ### Complete Broadcast with All Options
@@ -81,7 +64,6 @@ const broadcast = await ResendBroadcast("premium-newsletter", {
     Here's what's new this month...
   `,
   audience: audience,
-  scheduled_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Next week
   apiKey: alchemy.secret(process.env.RESEND_API_KEY)
 });
 ```
@@ -124,7 +106,6 @@ const broadcast = await ResendBroadcast("company-update", {
 - **`html`** (optional): HTML content of the broadcast
 - **`text`** (optional): Plain text content of the broadcast
 - **`reply_to`** (optional): Reply-to email address
-- **`scheduled_at`** (optional): When to send the broadcast (ISO 8601 format). If not provided, broadcast is created as draft
 - **`apiKey`** (optional): API key for authentication. Falls back to `RESEND_API_KEY` environment variable
 - **`baseUrl`** (optional): Custom API base URL. Defaults to `"https://api.resend.com"`
 
@@ -143,43 +124,8 @@ All input properties (except `audience` which becomes `audience_id`), plus:
 Broadcasts can have different statuses:
 
 - **`draft`**: Created but not scheduled or sent
-- **`scheduled`**: Scheduled for future sending
 - **`sent`**: Successfully sent to the audience
 - **`cancelled`**: Cancelled before sending
-
-## Scheduling Broadcasts
-
-### Schedule for Specific Time
-
-```ts
-// Schedule for Christmas morning
-const holidayBroadcast = await ResendBroadcast("holiday-greetings", {
-  name: "Holiday Greetings",
-  subject: "Happy Holidays!",
-  from: "greetings@example.com",
-  html: "<h1>Happy Holidays!</h1><p>Wishing you joy...</p>",
-  audience: audience,
-  scheduled_at: "2024-12-25T09:00:00Z"
-});
-```
-
-### Schedule Relative to Current Time
-
-```ts
-// Schedule for next Monday at 10 AM
-const nextMonday = new Date();
-nextMonday.setDate(nextMonday.getDate() + (1 + 7 - nextMonday.getDay()) % 7);
-nextMonday.setHours(10, 0, 0, 0);
-
-const weeklyUpdate = await ResendBroadcast("weekly-update", {
-  name: "Weekly Update",
-  subject: "This Week in Review",
-  from: "updates@example.com",
-  html: "<h1>Weekly Update</h1><p>Week summary...</p>",
-  audience: audience,
-  scheduled_at: nextMonday.toISOString()
-});
-```
 
 ## Content Best Practices
 
@@ -252,7 +198,6 @@ broadcast = await ResendBroadcast("draft-newsletter", {
   html: "<h1>Final Content</h1><p>Ready to send!</p>",
   text: "Final Content\n\nReady to send!",
   audience: audience,
-  scheduled_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hour from now
 });
 ```
 
@@ -260,7 +205,6 @@ broadcast = await ResendBroadcast("draft-newsletter", {
 
 - **Domain Verification**: The `from` address must be from a verified domain
 - **Content Requirements**: At least one of `html` or `text` content is required
-- **Scheduling**: Scheduled broadcasts can be updated before the send time
 - **Audience Reference**: You can use either audience resource references or ID strings
 - **Time Zones**: All timestamps use ISO 8601 format in UTC
 - **Delivery**: Resend handles the actual delivery and tracking of broadcasts
