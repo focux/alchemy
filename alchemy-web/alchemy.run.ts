@@ -4,6 +4,8 @@ import { GitHubComment } from "alchemy/github";
 
 const POSTHOG_DESTINATION_HOST =
   process.env.POSTHOG_DESTINATION_HOST ?? "us.i.posthog.com";
+const POSTHOT_ASSET_DESTINATION_HOST =
+  process.env.POSTHOG_ASSET_DESTINATION_HOST ?? "us-asset.i.posthog.com";
 //* this is not a secret, its public
 const POSTHOG_PROJECT_ID =
   process.env.POSTHOG_PROJECT_ID ??
@@ -21,19 +23,15 @@ const app = await alchemy("alchemy:website", {
 const domain =
   stage === "prod" ? ZONE : stage === "dev" ? `dev.${ZONE}` : undefined;
 
-await Worker("posthog-proxy", {
+export const posthogProxy = await Worker("posthog-proxy", {
   adopt: true,
   name: "alchemy-posthog-proxy",
-  script: `export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    url.hostname = "${POSTHOG_DESTINATION_HOST}";
-    url.protocol = "https";
-    const response = await fetch(url.toString(), request);
-    return response;
-  },
-};`,
+  entrypoint: "src/proxy.ts",
   domains: [POSTHOG_PROXY_HOST],
+  bindings: {
+    POSTHOG_DESTINATION_HOST: POSTHOG_DESTINATION_HOST,
+    POSTHOT_ASSET_DESTINATION_HOST: POSTHOT_ASSET_DESTINATION_HOST,
+  },
 });
 
 const website = await Website("website", {
