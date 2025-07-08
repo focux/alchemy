@@ -74,7 +74,7 @@ function printConsoleCall(
     // Handle arrays
     if (arg.subtype === "array" && arg.preview?.properties) {
       return arg.preview.properties
-        .filter((prop) => !isNaN(Number(prop.name)))
+        .filter((prop) => !Number.isNaN(Number(prop.name)))
         .sort((a, b) => Number(a.name) - Number(b.name))
         .map((prop) => prop.value);
     }
