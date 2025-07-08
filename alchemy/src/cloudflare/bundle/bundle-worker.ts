@@ -96,6 +96,7 @@ export async function bundleWorkerScript<B extends Bindings>(
       target: "esnext",
       platform: "node",
       minify: false,
+      sourcemap: true,
       ...(props.bundle || {}),
       conditions: ["workerd", "worker", "import", "module", "browser"],
       mainFields: ["module", "main"],
