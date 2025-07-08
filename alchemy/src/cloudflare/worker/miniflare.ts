@@ -105,6 +105,9 @@ class MiniflareServer {
     const inspectorProxy = new InspectorProxy(
       server.server,
       `ws://localhost:${this.inspectorPort}/${worker.name}`,
+      {
+        consoleIdentifier: worker.logToConsole ? worker.name : undefined,
+      },
     );
     this.inspectorProxies.set(worker.name, inspectorProxy);
 
