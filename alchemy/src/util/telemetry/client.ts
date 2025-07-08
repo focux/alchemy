@@ -19,19 +19,13 @@ export interface ITelemetryClient {
   ready: Promise<void>;
   record(event: Telemetry.EventInput): void;
   finalize(): Promise<void>;
-  getSessionId(): string;
 }
 
 export class NoopTelemetryClient implements ITelemetryClient {
-  private sessionId = crypto.randomUUID();
-
   ready = Promise.resolve();
   record(_: Telemetry.EventInput) {}
   finalize() {
     return Promise.resolve();
-  }
-  getSessionId() {
-    return this.sessionId;
   }
 }
 
@@ -57,10 +51,6 @@ export class TelemetryClient implements ITelemetryClient {
       },
       now,
     );
-  }
-
-  getSessionId() {
-    return this.context!.sessionId;
   }
 
   record(event: Telemetry.EventInput, timestamp = Date.now()) {

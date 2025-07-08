@@ -268,11 +268,13 @@ export const miniflareServer = new Proxy({} as MiniflareServer, {
 });
 
 export interface ClientSession {
-  id: string; // nanoid
+  id: string;
   ws: WsWebSocket;
-  requestMap: Map<number, number>; // clientId -> inspectorId
-  responseMap: Map<number, number>; // inspectorId -> clientId
+  requestMap: Map<number, number>;
+  responseMap: Map<number, number>;
 }
+
+const HOT_DOMAINS = ["Runtime", "Console", "Debugger", "Network"];
 
 class InspectorProxy {
   private inspectorUrl: string;
@@ -281,7 +283,6 @@ class InspectorProxy {
   private nextInspectorId = 1;
   private wss: WebSocketServer;
   private consoleIdentifier?: string;
-  private initialResponses: Array<string> = [];
   private filePath: string;
 
   constructor(
@@ -289,7 +290,6 @@ class InspectorProxy {
     inspectorUrl: string,
     options?: {
       consoleIdentifier?: string;
-      sessionId?: string;
     },
   ) {
     this.inspectorUrl = inspectorUrl;
@@ -300,17 +300,14 @@ class InspectorProxy {
     this.attachHandlersToInspectorWs();
 
     const currentScope = Scope.getScope();
-    if (currentScope == null && options?.sessionId == null) {
-      throw new Error("Inspector Proxy requires scope or sessionId");
+    if (currentScope == null) {
+      throw new Error("Inspector Proxy requires scope");
     }
-    const currentSessionId = (currentScope?.telemetryClient.getSessionId() ??
-      options?.sessionId)!;
     this.filePath = `${path.join(
       process.cwd(),
       ".alchemy",
       "logs",
       `${currentScope?.root.name}-${currentScope?.root.stage}`,
-      `${currentSessionId}`,
       currentScope?.chain
         ?.slice(3)
         .join("-")
@@ -325,13 +322,11 @@ class InspectorProxy {
       const sessionId = this.createSession(clientWs);
 
       clientWs.on("message", async (data) => {
-        console.log(`CLIENT[${sessionId}]=>PROXY: ${data.toString()}`);
         await this.handleClientMessage(clientWs, sessionId, data.toString());
       });
 
       clientWs.on("close", () => {
         this.sessions.delete(sessionId);
-        console.log(`Client disconnected: ${sessionId}`);
       });
     });
   }
@@ -379,6 +374,7 @@ class InspectorProxy {
         message.id = inspectorId;
       }
 
+      //todo(michael): this might cause issues with things like `Debugger.setAsyncCallStackDepth`
       if (
         typeof message.method === "string" &&
         message.method.endsWith(".enable")
@@ -388,12 +384,16 @@ class InspectorProxy {
         for await (const line of this.readHistoricServerMessages(domain)) {
           self.send(line);
         }
+        //* inspector doesn't need to know these turned on
+        return;
       }
 
-      console.log(`PROXY=>INSPECTOR: ${JSON.stringify(message)}`);
       this.inspectorWs.send(JSON.stringify(message));
     } catch (error) {
-      console.error("Error parsing client message:", error);
+      logger.error(
+        `[${this.consoleIdentifier}] Error parsing client message:`,
+        error,
+      );
     }
   }
 
@@ -407,7 +407,6 @@ class InspectorProxy {
         await fs.promises.appendFile(this.filePath, `${data}\n`);
       }
 
-      // Handle console API calls
       if (
         message.method === "Runtime.consoleAPICalled" &&
         this.consoleIdentifier
@@ -415,33 +414,28 @@ class InspectorProxy {
         parseConsoleAPICall(data, this.consoleIdentifier);
       }
 
-      // If message has an ID, it's a response - route to specific client
       if (typeof message.id === "number") {
         const targetSession = this.findSessionByInspectorId(message.id);
         if (targetSession) {
-          // Map ID back to original client ID
           const originalClientId = targetSession.responseMap.get(message.id);
           message.id = originalClientId;
 
-          // Clean up mappings
           targetSession.responseMap.delete(message.id);
           targetSession.requestMap.delete(originalClientId!);
 
-          // Send to specific client
-          console.log(
-            `PROXY=>CLIENT[${targetSession.id}]: ${JSON.stringify(message)}`,
-          );
           targetSession.ws.send(JSON.stringify(message));
           return;
         }
       }
 
-      // If no ID or ID not found, broadcast to all clients (events)
       this.sessions.forEach((session) => {
         session.ws.send(data);
       });
     } catch (error) {
-      console.error("Error parsing inspector message:", error);
+      logger.error(
+        `[${this.consoleIdentifier}] Error parsing inspector message:`,
+        error,
+      );
     }
   }
 
@@ -456,27 +450,34 @@ class InspectorProxy {
 
   attachHandlersToInspectorWs() {
     this.inspectorWs.onmessage = async (event) => {
-      console.log(`INSPECTOR=>PROXY: ${event.data.toString()}`);
       await this.handleInspectorMessage(event.data.toString());
     };
 
     this.inspectorWs.onclose = () => {
-      console.log("Inspector closed");
+      logger.warn(`[${this.consoleIdentifier}] Inspector closed`);
     };
 
     this.inspectorWs.onerror = (error) => {
-      console.error(`${this.consoleIdentifier}: Inspector errored:`, error);
+      logger.error(`[${this.consoleIdentifier}] Inspector errored:`, error);
     };
 
     this.inspectorWs.onopen = async () => {
       await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
       await fs.promises.writeFile(this.filePath, "");
-      console.log("Inspector opened");
+      for (const domain of HOT_DOMAINS) {
+        this.inspectorWs.send(
+          JSON.stringify({
+            id: this.nextInspectorId,
+            method: `${domain}.enable`,
+            params: {},
+          }),
+        );
+        this.nextInspectorId++;
+      }
     };
   }
 
   public async reconnect() {
-    // console.log("I WAS TOLD TO RECONNECT");
     this.inspectorWs = new WebSocket(this.inspectorUrl);
     this.attachHandlersToInspectorWs();
   }
