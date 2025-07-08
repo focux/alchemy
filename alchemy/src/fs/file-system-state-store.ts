@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { ResourceScope } from "../resource.ts";
 import type { Scope } from "../scope.ts";
-import { serialize } from "../serde.ts";
-import { deserializeState, type State, type StateStore } from "../state.ts";
+import { serialize, deserialize } from "../serde.ts";
+import type { State, StateStore } from "../state.ts";
 import { ignore } from "../util/ignore.ts";
 
 const stateRootDir = path.join(process.cwd(), ".alchemy");
@@ -69,7 +69,10 @@ export class FileSystemStateStore implements StateStore {
   async get(key: string): Promise<State | undefined> {
     try {
       const content = await fs.promises.readFile(this.getPath(key), "utf8");
-      const state = await deserializeState(this.scope, content);
+      const state = (await deserialize(
+        this.scope,
+        JSON.parse(content),
+      )) as State;
       if (state.output === undefined) {
         state.output = {} as any;
       }
@@ -131,8 +134,15 @@ export class FileSystemStateStore implements StateStore {
     if (key.includes("/")) {
       //todo(michael): remove this next time we do a breaking change
       //* windows doesn't support ":" in file paths, but we already use ":"
-      //* so now we use both to prevent breaking changes`
+      //* so now we use both to prevent breaking changes
       key = key.replaceAll("/", ALCHEMY_SEPERATOR_CHAR);
+    }
+    //todo(michael): remove this next time we do a breaking change
+    //* windows doesn't support "*" in file paths, but we already use "*"
+    //* when making cloudflare routes containing "*"
+    //* so now we use "+" on windows but "*" on mac/linux to prevent breaking changes
+    if (process.platform === "win32") {
+      key = key.replaceAll("*", "+");
     }
     return path.join(this.dir, `${key}.json`);
   }

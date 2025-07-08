@@ -4,6 +4,7 @@ import { Resource, ResourceKind } from "../resource.ts";
 import { bind } from "../runtime/bind.ts";
 import type { Secret } from "../secret.ts";
 import { logger } from "../util/logger.ts";
+import { withExponentialBackoff } from "../util/retry.ts";
 import { CloudflareApiError, handleApiError } from "./api-error.ts";
 import { type CloudflareApi, createCloudflareApi } from "./api.ts";
 import type { Bound } from "./bound.ts";
@@ -87,6 +88,17 @@ export interface BucketProps {
    * Whether to adopt an existing bucket
    */
   adopt?: boolean;
+
+  /**
+   * Whether to emulate the bucket locally when Alchemy is running in watch mode.
+   */
+  dev?: {
+    /**
+     * Whether to run the bucket remotely instead of locally
+     * @default false
+     */
+    remote?: boolean;
+  };
 }
 
 /**
@@ -248,6 +260,7 @@ const R2BucketResource = Resource(
       jurisdiction: props.jurisdiction || "default",
       type: "r2_bucket",
       accountId: api.accountId,
+      dev: props.dev,
     });
   },
 );
@@ -588,22 +601,29 @@ export async function updatePublicAccess(
 ): Promise<void> {
   const headers = withJurisdiction({}, jurisdiction);
 
-  const response = await api.put(
-    `/accounts/${api.accountId}/r2/buckets/${bucketName}/domains/managed`,
-    {
-      enabled: allowPublicAccess,
-    },
-    { headers },
-  );
+  await withExponentialBackoff(
+    async () => {
+      const response = await api.put(
+        `/accounts/${api.accountId}/r2/buckets/${bucketName}/domains/managed`,
+        {
+          enabled: allowPublicAccess,
+        },
+        { headers },
+      );
 
-  if (!response.ok) {
-    await handleApiError(
-      response,
-      "updating public access for",
-      "R2 bucket",
-      bucketName,
-    );
-  }
+      if (!response.ok) {
+        await handleApiError(
+          response,
+          "updating public access for",
+          "R2 bucket",
+          bucketName,
+        );
+      }
+    },
+    (err) => err.status === 404,
+    10,
+    1000,
+  );
 }
 
 /**

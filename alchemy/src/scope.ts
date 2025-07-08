@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import util from "node:util";
 import type { Phase } from "./alchemy.ts";
+import { DOStateStore } from "./cloudflare/do-state-store/index.ts";
 import { destroy, destroyAll } from "./destroy.ts";
 import { FileSystemStateStore } from "./fs/file-system-state-store.ts";
 import {
@@ -18,6 +20,7 @@ import {
   createLoggerInstance,
   type LoggerApi,
 } from "./util/cli.ts";
+import { logger } from "./util/logger.ts";
 import { AsyncMutex } from "./util/mutex.ts";
 import type { ITelemetryClient } from "./util/telemetry/client.ts";
 
@@ -28,14 +31,14 @@ export class RootScopeStateAttemptError extends Error {
 }
 
 export interface ScopeOptions {
-  appName?: string;
   stage?: string;
-  parent?: Scope;
-  scopeName?: string;
+  parent: Scope | undefined;
+  scopeName: string;
   password?: string;
   stateStore?: StateStoreType;
   quiet?: boolean;
   phase?: Phase;
+  dev?: boolean;
   telemetryClient?: ITelemetryClient;
   logger?: LoggerApi;
 }
@@ -46,7 +49,11 @@ export type PendingDeletions = Array<{
 }>;
 
 // TODO: support browser
-const DEFAULT_STAGE = process.env.ALCHEMY_STAGE ?? process.env.USER ?? "dev";
+export const DEFAULT_STAGE =
+  process.env.ALCHEMY_STAGE ??
+  process.env.USER ??
+  process.env.USERNAME ??
+  "dev";
 
 declare global {
   var __ALCHEMY_STORAGE__: AsyncLocalStorage<Scope>;
@@ -91,15 +98,16 @@ export class Scope {
 
   public readonly resources = new Map<ResourceID, PendingResource>();
   public readonly children: Map<ResourceID, Scope> = new Map();
-  public readonly appName: string | undefined;
   public readonly stage: string;
-  public readonly scopeName: string | null;
+  public readonly name: string;
+  public readonly scopeName: string;
   public readonly parent: Scope | undefined;
   public readonly password: string | undefined;
   public readonly state: StateStore;
   public readonly stateStore: StateStoreType;
   public readonly quiet: boolean;
   public readonly phase: Phase;
+  public readonly dev?: boolean;
   public readonly logger: LoggerApi;
   public readonly telemetryClient: ITelemetryClient;
   public readonly dataMutex: AsyncMutex;
@@ -110,15 +118,26 @@ export class Scope {
 
   private deferred: (() => Promise<any>)[] = [];
 
+  public get appName(): string {
+    if (this.parent) {
+      return this.parent.appName;
+    }
+    return this.scopeName;
+  }
+
   constructor(options: ScopeOptions) {
-    this.appName = options.appName;
-    this.scopeName = options.scopeName ?? null;
-    if (this.scopeName?.includes(":")) {
+    this.scopeName = options.scopeName;
+    this.name = this.scopeName;
+    this.parent = options.parent ?? Scope.getScope();
+
+    const isChild = this.parent !== undefined;
+    if (this.scopeName?.includes(":") && isChild) {
+      // TODO(sam): relax this constraint once we move to SQLite3 store
       throw new Error(
-        `Scope name ${this.scopeName} cannot contain double colons`,
+        `Scope name "${this.scopeName}" cannot contain double colons`,
       );
     }
-    this.parent = options.parent ?? Scope.getScope();
+
     this.stage = options?.stage ?? this.parent?.stage ?? DEFAULT_STAGE;
     this.parent?.children.set(this.scopeName!, this);
     this.quiet = options.quiet ?? this.parent?.quiet ?? false;
@@ -143,10 +162,21 @@ export class Scope {
           options.logger,
         );
 
+    this.dev = options.dev ?? this.parent?.dev ?? false;
+
+    if (this.dev) {
+      this.logger.warnOnce(
+        "Local development mode is in beta. Please report any issues to https://github.com/sam-goodwin/alchemy/issues.",
+      );
+    }
+
     this.stateStore =
       options.stateStore ??
       this.parent?.stateStore ??
-      ((scope) => new FileSystemStateStore(scope));
+      ((scope) =>
+        process.env.ALCHEMY_STATE_STORE === "cloudflare"
+          ? new DOStateStore(scope)
+          : new FileSystemStateStore(scope));
     this.state = this.stateStore(this);
     if (!options.telemetryClient && !this.parent?.telemetryClient) {
       throw new Error("Telemetry client is required");
@@ -190,7 +220,12 @@ export class Scope {
   }
 
   public async init() {
-    await Promise.all([this.state.init?.(), this.telemetryClient.ready]);
+    await Promise.all([
+      this.state.init?.(),
+      this.telemetryClient.ready.catch((error) => {
+        this.logger.warn("Telemetry initialization failed:", error);
+      }),
+    ]);
   }
 
   public async deinit() {
@@ -276,6 +311,10 @@ export class Scope {
 
   public async run<T>(fn: (scope: Scope) => Promise<T>): Promise<T> {
     return Scope.storage.run(this, () => fn(this));
+  }
+
+  [util.inspect.custom]() {
+    return `Scope(${this.chain.join("/")})`;
   }
 
   [Symbol.asyncDispose]() {
@@ -366,7 +405,9 @@ export class Scope {
       });
     }
 
-    await this.rootTelemetryClient?.finalize();
+    await this.rootTelemetryClient?.finalize()?.catch((error) => {
+      this.logger.warn("Telemetry finalization failed:", error);
+    });
   }
 
   public async destroyPendingDeletions() {
@@ -377,11 +418,20 @@ export class Scope {
         }
         throw e;
       })) ?? [];
+    //todo(michael): remove once we deprecate doss; see: https://github.com/sam-goodwin/alchemy/issues/585
+    let hasCorruptedResources = false;
     if (pendingDeletions) {
       for (const { resource, oldProps } of pendingDeletions) {
         //todo(michael): ugly hack due to the way scope is serialized
         const realResource = this.resources.get(resource[ResourceID])!;
         resource[ResourceScope] = realResource?.[ResourceScope] ?? this;
+        if (realResource == null && resource[ResourceID] == null) {
+          logger.warn(
+            "A replaced resource pending deletion is corrupted and will NOT be deleted. This is likely a bug with the state store.",
+          );
+          hasCorruptedResources = true;
+          continue;
+        }
         await destroy(resource, {
           quiet: this.quiet,
           strategy: "sequential",
@@ -391,6 +441,16 @@ export class Scope {
           },
         });
       }
+    }
+    if (hasCorruptedResources) {
+      const newPendingDeletions =
+        (await this.get<PendingDeletions>("pendingDeletions").catch(
+          () => [],
+        )) ?? [];
+      await this.set(
+        "pendingDeletions",
+        newPendingDeletions.filter((d) => d.resource[ResourceID] != null),
+      );
     }
   }
 
