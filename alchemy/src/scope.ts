@@ -223,7 +223,12 @@ export class Scope {
   }
 
   public async init() {
-    await Promise.all([this.state.init?.(), this.telemetryClient.ready]);
+    await Promise.all([
+      this.state.init?.(),
+      this.telemetryClient.ready.catch((error) => {
+        this.logger.warn("Telemetry initialization failed:", error);
+      }),
+    ]);
   }
 
   public async deinit() {
@@ -403,7 +408,9 @@ export class Scope {
       });
     }
 
-    await this.rootTelemetryClient?.finalize();
+    await this.rootTelemetryClient?.finalize()?.catch((error) => {
+      this.logger.warn("Telemetry finalization failed:", error);
+    });
   }
 
   public async destroyPendingDeletions() {
