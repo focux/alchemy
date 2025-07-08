@@ -302,6 +302,7 @@ class InspectorProxy {
       const sessionId = this.createSession(clientWs);
 
       clientWs.on("message", (data) => {
+        console.log(`CLIENT[${sessionId}]=>PROXY: ${data.toString()}`);
         this.handleClientMessage(sessionId, data.toString());
       });
 
@@ -340,6 +341,7 @@ class InspectorProxy {
         message.id = inspectorId;
       }
 
+      console.log(`PROXY=>INSPECTOR: ${JSON.stringify(message)}`);
       this.inspectorWs.send(JSON.stringify(message));
     } catch (error) {
       console.error("Error parsing client message:", error);
@@ -371,6 +373,9 @@ class InspectorProxy {
           targetSession.requestMap.delete(originalClientId!);
 
           // Send to specific client
+          console.log(
+            `PROXY=>CLIENT[${targetSession.id}]: ${JSON.stringify(message)}`,
+          );
           targetSession.ws.send(JSON.stringify(message));
           return;
         }
@@ -396,6 +401,7 @@ class InspectorProxy {
 
   attachHandlersToInspectorWs() {
     this.inspectorWs.onmessage = (event) => {
+      console.log(`INSPECTOR=>PROXY: ${event.data.toString()}`);
       this.handleInspectorMessage(event.data.toString());
     };
 
