@@ -5,8 +5,11 @@ import {
   type RemoteProxyConnectionString,
   type WorkerOptions,
 } from "miniflare";
+import fs, { createReadStream } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
+import { Scope } from "../../scope.ts";
 import { parseConsoleAPICall } from "../../util/chrome-devtools/parse-console-api-called.ts";
 import { colorize } from "../../util/cli.ts";
 import { findOpenPort } from "../../util/find-open-port.ts";
@@ -272,19 +275,21 @@ export interface ClientSession {
 }
 
 class InspectorProxy {
-  inspectorUrl: string;
-  inspectorWs: WebSocket;
+  private inspectorUrl: string;
+  private inspectorWs: WebSocket;
   private sessions = new Map<string, ClientSession>();
   private nextInspectorId = 1;
-  wss: WebSocketServer;
-  consoleIdentifier?: string;
-  initialResponses: Array<string> = [];
+  private wss: WebSocketServer;
+  private consoleIdentifier?: string;
+  private initialResponses: Array<string> = [];
+  private filePath: string;
 
   constructor(
     server: HTTPServer,
     inspectorUrl: string,
     options?: {
       consoleIdentifier?: string;
+      sessionId?: string;
     },
   ) {
     this.inspectorUrl = inspectorUrl;
@@ -294,16 +299,34 @@ class InspectorProxy {
     this.inspectorWs = new WebSocket(this.inspectorUrl);
     this.attachHandlersToInspectorWs();
 
+    const currentScope = Scope.getScope();
+    if (currentScope == null && options?.sessionId == null) {
+      throw new Error("Inspector Proxy requires scope or sessionId");
+    }
+    const currentSessionId = (currentScope?.telemetryClient.getSessionId() ??
+      options?.sessionId)!;
+    this.filePath = `${path.join(
+      process.cwd(),
+      ".alchemy",
+      "logs",
+      `${currentScope?.root.name}-${currentScope?.root.stage}`,
+      `${currentSessionId}`,
+      currentScope?.chain
+        ?.slice(3)
+        .join("-")
+        ?.replace(/[^a-zA-Z0-9._-]/g, "-") ?? "",
+    )}.log`;
+
     this.wss = new WebSocketServer({
       server: server.server,
     });
 
-    this.wss.on("connection", (clientWs) => {
+    this.wss.on("connection", async (clientWs) => {
       const sessionId = this.createSession(clientWs);
 
-      clientWs.on("message", (data) => {
+      clientWs.on("message", async (data) => {
         console.log(`CLIENT[${sessionId}]=>PROXY: ${data.toString()}`);
-        this.handleClientMessage(sessionId, data.toString());
+        await this.handleClientMessage(clientWs, sessionId, data.toString());
       });
 
       clientWs.on("close", () => {
@@ -324,7 +347,22 @@ class InspectorProxy {
     return sessionId;
   }
 
-  private handleClientMessage(sessionId: string, data: string) {
+  private async *readHistoricServerMessages(domain: string) {
+    const fileStream = createReadStream(this.filePath);
+    const rl = createInterface({ input: fileStream });
+
+    for await (const line of rl) {
+      if (line.startsWith(`{"method":"${domain}.`)) {
+        yield line;
+      }
+    }
+  }
+
+  private async handleClientMessage(
+    self: WsWebSocket,
+    sessionId: string,
+    data: string,
+  ) {
     try {
       const message = JSON.parse(data);
       const session = this.sessions.get(sessionId);
@@ -341,6 +379,17 @@ class InspectorProxy {
         message.id = inspectorId;
       }
 
+      if (
+        typeof message.method === "string" &&
+        message.method.endsWith(".enable")
+      ) {
+        const domain = message.method.slice(0, -"enable".length - 1);
+
+        for await (const line of this.readHistoricServerMessages(domain)) {
+          self.send(line);
+        }
+      }
+
       console.log(`PROXY=>INSPECTOR: ${JSON.stringify(message)}`);
       this.inspectorWs.send(JSON.stringify(message));
     } catch (error) {
@@ -348,9 +397,15 @@ class InspectorProxy {
     }
   }
 
-  private handleInspectorMessage(data: string) {
+  private async handleInspectorMessage(data: string) {
     try {
       const message = JSON.parse(data);
+
+      //* no id means the message isn't a response its from the server
+      //* so we save to file so we can roll forward later
+      if (message.id == null) {
+        await fs.promises.appendFile(this.filePath, `${data}\n`);
+      }
 
       // Handle console API calls
       if (
@@ -400,9 +455,9 @@ class InspectorProxy {
   }
 
   attachHandlersToInspectorWs() {
-    this.inspectorWs.onmessage = (event) => {
+    this.inspectorWs.onmessage = async (event) => {
       console.log(`INSPECTOR=>PROXY: ${event.data.toString()}`);
-      this.handleInspectorMessage(event.data.toString());
+      await this.handleInspectorMessage(event.data.toString());
     };
 
     this.inspectorWs.onclose = () => {
@@ -413,7 +468,9 @@ class InspectorProxy {
       console.error(`${this.consoleIdentifier}: Inspector errored:`, error);
     };
 
-    this.inspectorWs.onopen = () => {
+    this.inspectorWs.onopen = async () => {
+      await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
+      await fs.promises.writeFile(this.filePath, "");
       console.log("Inspector opened");
     };
   }
