@@ -11,6 +11,7 @@ import { parseConsoleAPICall } from "../../util/chrome-devtools/parse-console-ap
 import { colorize } from "../../util/cli.ts";
 import { findOpenPort } from "../../util/find-open-port.ts";
 import { logger } from "../../util/logger.ts";
+import { lowercaseId } from "../../util/nanoid.ts";
 import {
   promiseWithResolvers,
   type PromiseWithResolvers,
@@ -263,10 +264,18 @@ export const miniflareServer = new Proxy({} as MiniflareServer, {
   },
 });
 
+export interface ClientSession {
+  id: string; // nanoid
+  ws: WsWebSocket;
+  requestMap: Map<number, number>; // clientId -> inspectorId
+  responseMap: Map<number, number>; // inspectorId -> clientId
+}
+
 class InspectorProxy {
   inspectorUrl: string;
   inspectorWs: WebSocket;
-  clients: Array<WsWebSocket> = [];
+  private sessions = new Map<string, ClientSession>();
+  private nextInspectorId = 1;
   wss: WebSocketServer;
   consoleIdentifier?: string;
   initialResponses: Array<string> = [];
@@ -283,7 +292,6 @@ class InspectorProxy {
       ? colorize(`[${options.consoleIdentifier}]`, "cyanBright")
       : undefined;
     this.inspectorWs = new WebSocket(this.inspectorUrl);
-    console.log(this.inspectorUrl);
     this.attachHandlersToInspectorWs();
 
     this.wss = new WebSocketServer({
@@ -291,27 +299,104 @@ class InspectorProxy {
     });
 
     this.wss.on("connection", (clientWs) => {
-      this.clients.push(clientWs);
+      const sessionId = this.createSession(clientWs);
 
       clientWs.on("message", (data) => {
-        this.inspectorWs.send(data.toString());
+        this.handleClientMessage(sessionId, data.toString());
+      });
+
+      clientWs.on("close", () => {
+        this.sessions.delete(sessionId);
+        console.log(`Client disconnected: ${sessionId}`);
       });
     });
   }
 
-  attachHandlersToInspectorWs() {
-    this.inspectorWs.onmessage = (event) => {
-      const json = JSON.parse(event.data.toString());
+  private createSession(ws: WsWebSocket): string {
+    const sessionId = lowercaseId();
+    this.sessions.set(sessionId, {
+      id: sessionId,
+      ws: ws,
+      requestMap: new Map(),
+      responseMap: new Map(),
+    });
+    return sessionId;
+  }
+
+  private handleClientMessage(sessionId: string, data: string) {
+    try {
+      const message = JSON.parse(data);
+      const session = this.sessions.get(sessionId);
+
+      if (!session) {
+        console.error(`Session not found: ${sessionId}`);
+        return;
+      }
+
+      if (typeof message.id === "number") {
+        const inspectorId = this.nextInspectorId++;
+        session.requestMap.set(message.id, inspectorId);
+        session.responseMap.set(inspectorId, message.id);
+        message.id = inspectorId;
+      }
+
+      this.inspectorWs.send(JSON.stringify(message));
+    } catch (error) {
+      console.error("Error parsing client message:", error);
+    }
+  }
+
+  private handleInspectorMessage(data: string) {
+    try {
+      const message = JSON.parse(data);
+
+      // Handle console API calls
       if (
-        json.method === "Runtime.consoleAPICalled" &&
+        message.method === "Runtime.consoleAPICalled" &&
         this.consoleIdentifier
       ) {
-        //todo(michael): countReset isn't working in the console (works in devtools)
-        parseConsoleAPICall(event.data.toString(), this.consoleIdentifier);
+        parseConsoleAPICall(data, this.consoleIdentifier);
       }
-      this.clients.forEach((client) => {
-        client.send(event.data);
+
+      // If message has an ID, it's a response - route to specific client
+      if (typeof message.id === "number") {
+        const targetSession = this.findSessionByInspectorId(message.id);
+        if (targetSession) {
+          // Map ID back to original client ID
+          const originalClientId = targetSession.responseMap.get(message.id);
+          message.id = originalClientId;
+
+          // Clean up mappings
+          targetSession.responseMap.delete(message.id);
+          targetSession.requestMap.delete(originalClientId!);
+
+          // Send to specific client
+          targetSession.ws.send(JSON.stringify(message));
+          return;
+        }
+      }
+
+      // If no ID or ID not found, broadcast to all clients (events)
+      this.sessions.forEach((session) => {
+        session.ws.send(data);
       });
+    } catch (error) {
+      console.error("Error parsing inspector message:", error);
+    }
+  }
+
+  private findSessionByInspectorId(inspectorId: number): ClientSession | null {
+    for (const session of this.sessions.values()) {
+      if (session.responseMap.has(inspectorId)) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  attachHandlersToInspectorWs() {
+    this.inspectorWs.onmessage = (event) => {
+      this.handleInspectorMessage(event.data.toString());
     };
 
     this.inspectorWs.onclose = () => {
