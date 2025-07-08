@@ -274,6 +274,8 @@ export interface ClientSession {
   responseMap: Map<number, number>;
 }
 
+//todo(michael): we may want to hot start domains with params
+//e.g. {"id":1,"method":"Network.enable","params":{"maxPostDataSize":65536,"reportDirectSocketTraffic":true}
 const HOT_DOMAINS = ["Runtime", "Console", "Debugger", "Network"];
 
 class InspectorProxy {
@@ -284,6 +286,7 @@ class InspectorProxy {
   private wss: WebSocketServer;
   private consoleIdentifier?: string;
   private filePath: string;
+  private persistLogs: boolean;
 
   constructor(
     server: HTTPServer,
@@ -303,6 +306,7 @@ class InspectorProxy {
     if (currentScope == null) {
       throw new Error("Inspector Proxy requires scope");
     }
+    this.persistLogs = currentScope.persistLogs ?? true;
     this.filePath = `${path.join(
       process.cwd(),
       ".alchemy",
@@ -403,7 +407,7 @@ class InspectorProxy {
 
       //* no id means the message isn't a response its from the server
       //* so we save to file so we can roll forward later
-      if (message.id == null) {
+      if (message.id == null && this.persistLogs) {
         await fs.promises.appendFile(this.filePath, `${data}\n`);
       }
 
@@ -462,8 +466,12 @@ class InspectorProxy {
     };
 
     this.inspectorWs.onopen = async () => {
-      await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
-      await fs.promises.writeFile(this.filePath, "");
+      if (this.persistLogs) {
+        await fs.promises.mkdir(path.dirname(this.filePath), {
+          recursive: true,
+        });
+        await fs.promises.writeFile(this.filePath, "");
+      }
       for (const domain of HOT_DOMAINS) {
         this.inspectorWs.send(
           JSON.stringify({
