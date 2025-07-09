@@ -1092,14 +1092,15 @@ export const _Worker = Resource(
       if (oldName !== newName) {
         if (dispatchNamespace) {
           await this.replace(true);
-        }
-        const renameResponse = await api.patch(
-          `/accounts/${api.accountId}/workers/services/${oldName}`,
-          { id: newName },
-        );
+        } else {
+          const renameResponse = await api.patch(
+            `/accounts/${api.accountId}/workers/services/${oldName}`,
+            { id: newName },
+          );
 
-        if (!renameResponse.ok) {
-          await handleApiError(renameResponse, "rename", "worker", oldName);
+          if (!renameResponse.ok) {
+            await handleApiError(renameResponse, "rename", "worker", oldName);
+          }
         }
       }
     }
