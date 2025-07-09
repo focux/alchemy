@@ -150,10 +150,10 @@ export async function createAndVerifyGitHubClient(options: {
   quiet?: boolean;
 }): Promise<Octokit> {
   const octokit = await createGitHubClient({ token: options.token });
-  
+
   if (!options.quiet) {
     await verifyGitHubAuth(octokit, options.owner, options.repository);
   }
-  
+
   return octokit;
 }
