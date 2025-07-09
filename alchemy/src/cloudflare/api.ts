@@ -61,13 +61,11 @@ export async function createCloudflareApi(
   } else if (options.apiKey !== undefined) {
     // Explicit apiKey provided
     apiKey = options.apiKey;
-  } else {
+  } else if (process.env.CLOUDFLARE_API_TOKEN) {
     // No explicit credentials, check environment variables: CLOUDFLARE_API_TOKEN > CLOUDFLARE_API_KEY
-    if (process.env.CLOUDFLARE_API_TOKEN) {
-      apiToken = alchemy.secret(process.env.CLOUDFLARE_API_TOKEN);
-    } else if (process.env.CLOUDFLARE_API_KEY) {
-      apiKey = alchemy.secret(process.env.CLOUDFLARE_API_KEY);
-    }
+    apiToken = alchemy.secret(process.env.CLOUDFLARE_API_TOKEN);
+  } else if (process.env.CLOUDFLARE_API_KEY) {
+    apiKey = alchemy.secret(process.env.CLOUDFLARE_API_KEY);
   }
   let email = options.email ?? process.env.CLOUDFLARE_EMAIL;
   if (apiKey && !email) {
