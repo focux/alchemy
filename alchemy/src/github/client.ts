@@ -136,3 +136,24 @@ export async function verifyGitHubAuth(
     throw error;
   }
 }
+
+/**
+ * Create an authenticated Octokit client and verify repository access
+ *
+ * @param options Options for creating and verifying the client
+ * @returns An authenticated and verified Octokit client
+ */
+export async function createAndVerifyGitHubClient(options: {
+  token?: string;
+  owner: string;
+  repository: string;
+  quiet?: boolean;
+}): Promise<Octokit> {
+  const octokit = await createGitHubClient({ token: options.token });
+  
+  if (!options.quiet) {
+    await verifyGitHubAuth(octokit, options.owner, options.repository);
+  }
+  
+  return octokit;
+}
