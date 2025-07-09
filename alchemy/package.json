@@ -61,6 +61,10 @@
       "bun": "./src/cloudflare/index.ts",
       "import": "./lib/cloudflare/index.js"
     },
+    "./discord": {
+      "bun": "./src/discord/index.ts",
+      "import": "./lib/discord/index.js"
+    },
     "./dns": {
       "bun": "./src/dns/index.ts",
       "import": "./lib/dns/index.js"
