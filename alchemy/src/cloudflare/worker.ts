@@ -1090,6 +1090,9 @@ export const _Worker = Resource(
       const newName = workerName;
 
       if (oldName !== newName) {
+        if (dispatchNamespace) {
+          await this.replace(true);
+        }
         const renameResponse = await api.patch(
           `/accounts/${api.accountId}/workers/services/${oldName}`,
           { id: newName },
