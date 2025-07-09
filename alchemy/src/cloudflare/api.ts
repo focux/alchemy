@@ -51,22 +51,24 @@ export interface CloudflareApiOptions {
 export async function createCloudflareApi(
   options: Partial<CloudflareApiOptions> = {},
 ): Promise<CloudflareApi> {
-  // Check if user provided any explicit auth credentials
-  const hasExplicitAuth =
-    options.apiKey !== undefined || options.apiToken !== undefined;
+  // Prioritize explicit credentials: check apiToken first, then apiKey
+  let apiKey: Secret | undefined;
+  let apiToken: Secret | undefined;
 
-  const apiKey = hasExplicitAuth
-    ? options.apiKey
-    : (options.apiKey ??
-      (process.env.CLOUDFLARE_API_KEY
-        ? alchemy.secret(process.env.CLOUDFLARE_API_KEY)
-        : undefined));
-  const apiToken = hasExplicitAuth
-    ? options.apiToken
-    : (options.apiToken ??
-      (process.env.CLOUDFLARE_API_TOKEN
-        ? alchemy.secret(process.env.CLOUDFLARE_API_TOKEN)
-        : undefined));
+  if (options.apiToken !== undefined) {
+    // Explicit apiToken provided
+    apiToken = options.apiToken;
+  } else if (options.apiKey !== undefined) {
+    // Explicit apiKey provided
+    apiKey = options.apiKey;
+  } else {
+    // No explicit credentials, check environment variables: CLOUDFLARE_API_TOKEN > CLOUDFLARE_API_KEY
+    if (process.env.CLOUDFLARE_API_TOKEN) {
+      apiToken = alchemy.secret(process.env.CLOUDFLARE_API_TOKEN);
+    } else if (process.env.CLOUDFLARE_API_KEY) {
+      apiKey = alchemy.secret(process.env.CLOUDFLARE_API_KEY);
+    }
+  }
   let email = options.email ?? process.env.CLOUDFLARE_EMAIL;
   if (apiKey && !email) {
     email = await getUserEmailFromApiKey(apiKey.unencrypted);
