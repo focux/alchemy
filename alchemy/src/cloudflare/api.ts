@@ -51,16 +51,22 @@ export interface CloudflareApiOptions {
 export async function createCloudflareApi(
   options: Partial<CloudflareApiOptions> = {},
 ): Promise<CloudflareApi> {
-  const apiKey =
-    options.apiKey ??
-    (process.env.CLOUDFLARE_API_KEY
-      ? alchemy.secret(process.env.CLOUDFLARE_API_KEY)
-      : undefined);
-  const apiToken =
-    options.apiToken ??
-    (process.env.CLOUDFLARE_API_TOKEN
-      ? alchemy.secret(process.env.CLOUDFLARE_API_TOKEN)
-      : undefined);
+  // Check if user provided any explicit auth credentials
+  const hasExplicitAuth =
+    options.apiKey !== undefined || options.apiToken !== undefined;
+
+  const apiKey = hasExplicitAuth
+    ? options.apiKey
+    : (options.apiKey ??
+      (process.env.CLOUDFLARE_API_KEY
+        ? alchemy.secret(process.env.CLOUDFLARE_API_KEY)
+        : undefined));
+  const apiToken = hasExplicitAuth
+    ? options.apiToken
+    : (options.apiToken ??
+      (process.env.CLOUDFLARE_API_TOKEN
+        ? alchemy.secret(process.env.CLOUDFLARE_API_TOKEN)
+        : undefined));
   let email = options.email ?? process.env.CLOUDFLARE_EMAIL;
   if (apiKey && !email) {
     email = await getUserEmailFromApiKey(apiKey.unencrypted);
