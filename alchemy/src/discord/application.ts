@@ -5,31 +5,6 @@ import { logger } from "../util/logger.ts";
 import { type DiscordApi, createDiscordApi } from "./api.ts";
 
 /**
- * Get application information.
- */
-export async function getApplication(api: DiscordApi): Promise<any> {
-  return api.get("applications/@me");
-}
-
-/**
- * Update application information.
- */
-export async function updateApplication(
-  api: DiscordApi,
-  applicationId: string,
-  data: any,
-): Promise<any> {
-  return api.patch(`applications/${applicationId}`, data);
-}
-
-/**
- * Get current bot user information.
- */
-export async function getCurrentUser(api: DiscordApi): Promise<any> {
-  return api.get("users/@me");
-}
-
-/**
  * Properties for creating or updating a Discord Application.
  */
 export interface ApplicationProps {
@@ -276,3 +251,28 @@ export const Application = Resource(
     });
   },
 );
+
+/**
+ * Get application information.
+ */
+export async function getApplication(api: DiscordApi): Promise<any> {
+  return api.get("applications/@me");
+}
+
+/**
+ * Update application information.
+ */
+export async function updateApplication(
+  api: DiscordApi,
+  applicationId: string,
+  data: any,
+): Promise<any> {
+  return api.patch(`applications/${applicationId}`, data);
+}
+
+/**
+ * Get current bot user information.
+ */
+export async function getCurrentUser(api: DiscordApi): Promise<any> {
+  return api.get("users/@me");
+}

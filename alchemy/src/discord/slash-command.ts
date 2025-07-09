@@ -1,68 +1,8 @@
 import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import { logger } from "../util/logger.ts";
-import type { Application } from "./application.ts";
 import { type DiscordApi, createDiscordApi } from "./api.ts";
-
-/**
- * Get commands for an application.
- */
-export async function getCommands(
-  api: DiscordApi,
-  applicationId: string,
-  guildId?: string,
-): Promise<any[]> {
-  const path = guildId
-    ? `applications/${applicationId}/guilds/${guildId}/commands`
-    : `applications/${applicationId}/commands`;
-  return api.get(path);
-}
-
-/**
- * Create a command for an application.
- */
-export async function createCommand(
-  api: DiscordApi,
-  applicationId: string,
-  data: any,
-  guildId?: string,
-): Promise<any> {
-  const path = guildId
-    ? `applications/${applicationId}/guilds/${guildId}/commands`
-    : `applications/${applicationId}/commands`;
-  return api.post(path, data);
-}
-
-/**
- * Update a command for an application.
- */
-export async function updateCommand(
-  api: DiscordApi,
-  applicationId: string,
-  commandId: string,
-  data: any,
-  guildId?: string,
-): Promise<any> {
-  const path = guildId
-    ? `applications/${applicationId}/guilds/${guildId}/commands/${commandId}`
-    : `applications/${applicationId}/commands/${commandId}`;
-  return api.patch(path, data);
-}
-
-/**
- * Delete a command for an application.
- */
-export async function deleteCommand(
-  api: DiscordApi,
-  applicationId: string,
-  commandId: string,
-  guildId?: string,
-): Promise<any> {
-  const path = guildId
-    ? `applications/${applicationId}/guilds/${guildId}/commands/${commandId}`
-    : `applications/${applicationId}/commands/${commandId}`;
-  return api.delete(path);
-}
+import type { Application } from "./application.ts";
 
 /**
  * Discord command types.
@@ -410,3 +350,63 @@ export const SlashCommand = Resource(
     });
   },
 );
+
+/**
+ * Get commands for an application.
+ */
+export async function getCommands(
+  api: DiscordApi,
+  applicationId: string,
+  guildId?: string,
+): Promise<any[]> {
+  const path = guildId
+    ? `applications/${applicationId}/guilds/${guildId}/commands`
+    : `applications/${applicationId}/commands`;
+  return api.get(path);
+}
+
+/**
+ * Create a command for an application.
+ */
+export async function createCommand(
+  api: DiscordApi,
+  applicationId: string,
+  data: any,
+  guildId?: string,
+): Promise<any> {
+  const path = guildId
+    ? `applications/${applicationId}/guilds/${guildId}/commands`
+    : `applications/${applicationId}/commands`;
+  return api.post(path, data);
+}
+
+/**
+ * Update a command for an application.
+ */
+export async function updateCommand(
+  api: DiscordApi,
+  applicationId: string,
+  commandId: string,
+  data: any,
+  guildId?: string,
+): Promise<any> {
+  const path = guildId
+    ? `applications/${applicationId}/guilds/${guildId}/commands/${commandId}`
+    : `applications/${applicationId}/commands/${commandId}`;
+  return api.patch(path, data);
+}
+
+/**
+ * Delete a command for an application.
+ */
+export async function deleteCommand(
+  api: DiscordApi,
+  applicationId: string,
+  commandId: string,
+  guildId?: string,
+): Promise<any> {
+  const path = guildId
+    ? `applications/${applicationId}/guilds/${guildId}/commands/${commandId}`
+    : `applications/${applicationId}/commands/${commandId}`;
+  return api.delete(path);
+}
