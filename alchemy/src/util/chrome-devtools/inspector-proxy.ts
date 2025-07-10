@@ -3,7 +3,6 @@ import type http from "node:http";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
-import { Scope } from "../../scope.ts";
 import { colorize } from "../cli.ts";
 import { logger } from "../logger.ts";
 import { lowercaseId } from "../nanoid.ts";
@@ -33,8 +32,10 @@ export class InspectorProxy {
   constructor(
     server: http.Server,
     inspectorUrl: string,
+    logName: string,
     options?: {
       consoleIdentifier?: string;
+      persistLogs?: boolean;
     },
   ) {
     this.inspectorUrl = inspectorUrl;
@@ -44,27 +45,21 @@ export class InspectorProxy {
     this.inspectorWs = new WebSocket(this.inspectorUrl);
     this.attachHandlersToInspectorWs();
 
-    const currentScope = Scope.getScope();
-    if (currentScope == null) {
-      throw new Error("Inspector Proxy requires scope");
-    }
-    this.persistLogs = currentScope.persistLogs ?? true;
+    this.persistLogs = options?.persistLogs ?? true;
     this.filePath = `${path.join(
       process.cwd(),
       ".alchemy",
       "logs",
-      `${currentScope?.root.name}-${currentScope?.root.stage}`,
-      currentScope?.chain
-        ?.slice(3)
-        .join("-")
-        ?.replace(/[^a-zA-Z0-9._-]/g, "-") ?? "",
+      logName.replace(/[^a-zA-Z0-9._-]/g, "-") ?? "",
     )}.log`;
+    console.log("FILE PATH", this.filePath);
 
     this.wss = new WebSocketServer({
       server: server,
     });
 
     this.wss.on("connection", async (clientWs) => {
+      console.log("CONNECTION", this.inspectorUrl);
       const sessionId = this.createSession(clientWs);
 
       clientWs.on("message", async (data) => {
@@ -145,6 +140,7 @@ export class InspectorProxy {
 
   private async handleInspectorMessage(data: string) {
     try {
+      // console.log("INSPECTOR MESSAGE", this.inspectorUrl, data);
       const message = JSON.parse(data);
 
       //* no id means the message isn't a response its from the server
@@ -208,6 +204,7 @@ export class InspectorProxy {
     };
 
     this.inspectorWs.onopen = async () => {
+      logger.log(`[${this.consoleIdentifier}] Inspector opened`);
       if (this.persistLogs) {
         await fs.promises.mkdir(path.dirname(this.filePath), {
           recursive: true,

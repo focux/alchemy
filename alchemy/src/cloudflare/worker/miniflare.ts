@@ -6,6 +6,7 @@ import {
   type WorkerOptions,
 } from "miniflare";
 import path from "node:path";
+import { Scope } from "../../scope.ts";
 import { InspectorProxy } from "../../util/chrome-devtools/inspector-proxy.ts";
 import { findOpenPort } from "../../util/find-open-port.ts";
 import { logger } from "../../util/logger.ts";
@@ -20,6 +21,8 @@ import {
   type MiniflareWorkerOptions,
 } from "./miniflare-worker-options.ts";
 import { createMixedModeProxy, type MixedModeProxy } from "./mixed-mode.ts";
+
+let created = false;
 
 class MiniflareServer {
   miniflare?: Miniflare;
@@ -57,6 +60,7 @@ class MiniflareServer {
   }
 
   async close() {
+    console.log("closed?");
     await this.writer.close();
   }
 
@@ -102,11 +106,15 @@ class MiniflareServer {
       port: worker.port ?? (await findOpenPort()),
       fetch: this.createRequestHandler(worker.name as string),
     });
+    console.log(`ws://localhost:${this.inspectorPort}/${worker.name}`);
+    console.log("CREATING PROXY", server.url);
     const inspectorProxy = new InspectorProxy(
       server.server,
       `ws://localhost:${this.inspectorPort}/${worker.name}`,
+      worker.name,
       {
         consoleIdentifier: worker.logToConsole ? worker.name : undefined,
+        persistLogs: Scope.getScope()?.root?.persistLogs ?? true,
       },
     );
     this.inspectorProxies.set(worker.name, inspectorProxy);
@@ -224,7 +232,7 @@ class MiniflareServer {
       secretsStorePersist: true,
       workflowsPersist: true,
       inspectorPort: this.inspectorPort,
-      handleRuntimeStdio: () => {},
+      // handleRuntimeStdio: () => {},
     };
     return options;
   }
