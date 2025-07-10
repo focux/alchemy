@@ -83,7 +83,7 @@ export function getPackageManagerCommands(pm: PackageManager) {
       create: "deno run -A",
       x: "deno run -A",
     },
-  };
+  } as const;
 
   return commands[pm];
 }
