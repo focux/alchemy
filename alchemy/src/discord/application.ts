@@ -27,7 +27,7 @@ export interface ApplicationProps {
    * Whether the bot can be added by anyone.
    * @default false
    */
-  botPublic?: boolean;
+  public?: boolean;
 
   /**
    * Whether bot requires OAuth2 code grant.
@@ -134,7 +134,7 @@ export const Application = Resource(
       name,
       description,
       icon,
-      botPublic = false,
+      public: botPublic = false,
       botRequireCodeGrant = false,
       interactionsEndpointUrl,
     } = props;

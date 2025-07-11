@@ -2,7 +2,7 @@ import alchemy from "alchemy";
 import { Worker } from "alchemy/cloudflare";
 import { Application, CommandOptionType, SlashCommand } from "alchemy/discord";
 
-const app = await alchemy("discord-bot-example");
+const app = await alchemy("my-discord-bot");
 
 // Get Discord credentials from environment
 const botToken = alchemy.secret(process.env.DISCORD_TOKEN!);
@@ -20,12 +20,12 @@ export const worker = await Worker("discord-interactions", {
 });
 
 // Configure Discord application with the worker URL
-const discord = await Application("discord-bot", {
-  name: "Alchemy Example Bot",
-  description:
-    "An example Discord bot powered by Alchemy and Cloudflare Workers",
+const discord = await Application("alchemy-test", {
+  name: "alchemy-test",
+  description: "A Discord bot powered by Alchemy and Cloudflare Workers",
   botToken,
   interactionsEndpointUrl: worker.url,
+  public: false,
 });
 
 // Create a ping command
@@ -46,27 +46,6 @@ await SlashCommand("hello", {
       name: "name",
       description: "Name to greet",
       required: true,
-    },
-  ],
-});
-
-// Create an echo command
-await SlashCommand("echo", {
-  application: discord,
-  name: "echo",
-  description: "Echo back your message",
-  options: [
-    {
-      type: CommandOptionType.STRING,
-      name: "message",
-      description: "Message to echo",
-      required: true,
-    },
-    {
-      type: CommandOptionType.BOOLEAN,
-      name: "uppercase",
-      description: "Echo in uppercase",
-      required: false,
     },
   ],
 });

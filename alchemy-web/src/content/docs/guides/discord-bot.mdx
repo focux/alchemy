@@ -11,25 +11,7 @@ Build a Discord bot with slash commands that runs on Cloudflare Workers. This gu
 
 <Steps>
 
-1. **Create a Discord Application**
-
-   :::note[Manual Step Required]
-   Discord requires applications to be created manually through their developer portal. Alchemy will manage the application after creation.
-   :::
-
-   First, create a Discord application on the [Discord Developer Portal](https://discord.com/developers/applications):
-   
-   - Click "New Application"
-   - Give it a name and create it
-   - Go to the "Bot" section
-   - Click "Reset Token" and save the token securely
-   - Under "Public Bot", ensure it's enabled if you want others to add your bot
-   
-   :::tip
-   Save your bot token in a `.env` file immediately. You can only view it once!
-   :::
-
-2. **Initialize your project**
+1. **Initialize your project**
 
    Create a new project for your Discord bot:
 
@@ -69,23 +51,38 @@ Build a Discord bot with slash commands that runs on Cloudflare Workers. This gu
      </TabItem>
    </Tabs>
 
-3. **Set up credentials**
+2. **Create a Discord Application**
 
-   Create a `.env` file with your Discord credentials:
+   :::note[Manual Step Required]
+   Discord requires applications to be created manually through their developer portal. Alchemy will manage the application after creation.
+   :::
+
+   First, create a Discord application on the [Discord Developer Portal](https://discord.com/developers/applications):
+   
+   - Click "New Application"
+   - Give it a name and create it
+   
+
+   ![Discord Application ID Location](/discord-bot-app-id.png)
+
+2. **Create a Bot Token**
+
+   - Go to the "Bot" section
+   - Click "Reset Token" and save the token securely
+
+   ![Discord Bot Token Location](/discord-bot-token.png)
+
+
+3. **Store Discord Bot Credentials**
+
+   Add the Discord Application ID Public Key to a `.env` file:
 
    ```sh
    # Get these from Discord Developer Portal
    DISCORD_TOKEN=your_bot_token_here
    DISCORD_APPLICATION_ID=your_application_id_here
    DISCORD_PUBLIC_KEY=your_public_key_here
-   
-   # For Alchemy encryption
-   ALCHEMY_PASSWORD=change-me-to-something-secure
    ```
-
-   :::tip
-   You can find the Application ID and Public Key in the "General Information" section of your Discord application.
-   :::
 
    :::caution
    Never commit your `.env` file to version control. Add it to `.gitignore`.
@@ -123,19 +120,19 @@ Build a Discord bot with slash commands that runs on Cloudflare Workers. This gu
    Create `alchemy.run.ts`:
 
    ```typescript
-   import alchemy, { secret } from "alchemy";
+   import alchemy from "alchemy";
    import { Worker } from "alchemy/cloudflare";
    import { Application, SlashCommand, CommandOptionType } from "alchemy/discord";
 
    const app = await alchemy("my-discord-bot");
 
    // Get Discord credentials from environment
-   const botToken = secret(process.env.DISCORD_TOKEN!);
+   const botToken = alchemy.secret(process.env.DISCORD_TOKEN!);
    const publicKey = process.env.DISCORD_PUBLIC_KEY!;
    const applicationId = process.env.DISCORD_APPLICATION_ID!;
 
    // Create the interactions worker first
-   const worker = await Worker("discord-interactions", {
+   export const worker = await Worker("discord-interactions", {
      entrypoint: "./src/bot.ts",
      bindings: {
        DISCORD_PUBLIC_KEY: publicKey,
@@ -190,15 +187,10 @@ Build a Discord bot with slash commands that runs on Cloudflare Workers. This gu
 
    ```typescript
    import { verifyKey } from "discord-interactions";
-
-   export interface Env {
-     DISCORD_PUBLIC_KEY: string;
-     DISCORD_APPLICATION_ID: string;
-     DISCORD_BOT_TOKEN: string;
-   }
+   import type { worker } from "../alchemy.run.ts";
 
    export default {
-     async fetch(request: Request, env: Env): Promise<Response> {
+     async fetch(request: Request, env: typeof worker.Env): Promise<Response> {
        // Verify Discord signature
        const signature = request.headers.get("X-Signature-Ed25519");
        const timestamp = request.headers.get("X-Signature-Timestamp");
