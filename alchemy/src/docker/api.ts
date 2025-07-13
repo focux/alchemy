@@ -57,9 +57,13 @@ export class DockerApi {
    * Run a Docker CLI command
    *
    * @param args Command arguments to pass to Docker CLI
-   * @returns Result of the command
+   * @param options Options for command execution
+   * @returns Result of the command (only has stdout/stderr when stream=false)
    */
-  async exec(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  async exec(
+    args: string[],
+    options: { stream?: boolean } = {},
+  ): Promise<{ stdout: string; stderr: string }> {
     // If a custom config directory is provided, ensure all commands use it by
     // setting the DOCKER_CONFIG env variable for the spawned process.
     const env = this.configDir
@@ -67,13 +71,18 @@ export class DockerApi {
       : process.env;
 
     const command = `${this.dockerPath} ${args.join(" ")}`;
+
+    // When streaming, inherit stdio so output goes to terminal
+    const captureOutput = !options.stream;
+
     const result = (await exec(command, {
-      captureOutput: true,
+      captureOutput,
       shell: true,
       env,
-    })) as { stdout: string; stderr: string };
+    })) as { stdout: string; stderr: string } | undefined;
 
-    return result;
+    // Return empty strings for stdout/stderr when streaming
+    return result || { stdout: "", stderr: "" };
   }
 
   /**
@@ -98,10 +107,14 @@ export class DockerApi {
    * Pull Docker image
    *
    * @param image Image name and tag
+   * @param options Options for pull execution
    * @returns Result of the pull command
    */
-  async pullImage(image: string): Promise<{ stdout: string; stderr: string }> {
-    return this.exec(["pull", image]);
+  async pullImage(
+    image: string,
+    options: { stream?: boolean } = { stream: true },
+  ): Promise<{ stdout: string; stderr: string }> {
+    return this.exec(["pull", image], options);
   }
 
   /**
@@ -110,12 +123,14 @@ export class DockerApi {
    * @param path Path to Dockerfile directory
    * @param tag Tag for the image
    * @param buildArgs Build arguments
+   * @param options Options for build execution
    * @returns Result of the build command
    */
   async buildImage(
     path: string,
     tag: string,
     buildArgs: Record<string, string> = {},
+    options: { stream?: boolean } = { stream: true },
   ): Promise<{ stdout: string; stderr: string }> {
     const args = ["build", "-t", tag, path];
 
@@ -123,7 +138,7 @@ export class DockerApi {
       args.push("--build-arg", `${key}=${value}`);
     }
 
-    return this.exec(args);
+    return this.exec(args, options);
   }
 
   /**

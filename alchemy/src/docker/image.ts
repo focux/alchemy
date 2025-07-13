@@ -206,11 +206,14 @@ export const Image = Resource(
       // Add context path
       buildArgs.push(context);
 
-      // Execute build command
-      const { stdout } = await api.exec(buildArgs);
+      // Execute build command with streaming enabled
+      const { stdout } = await api.exec(buildArgs, { stream: true });
 
-      // Extract image ID from build output if available
-      const imageIdMatch = /Successfully built ([a-f0-9]+)/.exec(stdout);
+      // Note: When streaming is enabled, stdout will be empty since output goes to terminal
+      // Extract image ID from build output if available (when not streaming)
+      const imageIdMatch = stdout
+        ? /Successfully built ([a-f0-9]+)/.exec(stdout)
+        : null;
       const imageId = imageIdMatch ? imageIdMatch[1] : undefined;
 
       // Handle push if required
@@ -240,13 +243,16 @@ export const Image = Resource(
             await api.exec(["tag", imageRef, targetImage]);
           }
 
-          // Push the image
-          const { stdout: pushOut } = await api.exec(["push", targetImage]);
+          // Push the image with streaming enabled
+          const { stdout: pushOut } = await api.exec(["push", targetImage], {
+            stream: true,
+          });
 
-          // Attempt to extract the repo digest from push output
-          const digestMatch = /digest:\s+([a-z0-9]+:[a-f0-9]{64})/.exec(
-            pushOut,
-          );
+          // Note: When streaming is enabled, stdout will be empty since output goes to terminal
+          // Attempt to extract the repo digest from push output if available (when not streaming)
+          const digestMatch = pushOut
+            ? /digest:\s+([a-z0-9]+:[a-f0-9]{64})/.exec(pushOut)
+            : null;
           if (digestMatch) {
             const digestHash = digestMatch[1];
             // Strip tag (anything after last :) to build image@digest reference
