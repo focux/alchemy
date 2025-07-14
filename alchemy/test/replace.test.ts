@@ -47,7 +47,7 @@ describe.sequential("Replace-Sequential", () => {
           }
           if (this.phase === "update") {
             if (props.name !== this.output.name) {
-              this.replace();
+              await this.replace();
             }
           }
           if (props.child) {
