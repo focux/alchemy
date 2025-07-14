@@ -81,7 +81,7 @@ import {
 } from "./worker-metadata.ts";
 import { WorkerStub, isWorkerStub } from "./worker-stub.ts";
 import { WorkerSubdomain, disableWorkerSubdomain } from "./worker-subdomain.ts";
-import { createTail } from "./worker/tail.ts";
+import { createTail } from "./worker-tail.ts";
 import { Workflow, isWorkflow, upsertWorkflow } from "./workflow.ts";
 
 /**
@@ -1024,7 +1024,7 @@ export const _Worker = Resource(
           createDevCommand({
             id,
             command: dev.command,
-            cwd: dev.cwd ?? process.cwd(),
+            cwd: dev.cwd ?? props.cwd ?? process.cwd(),
             env: props.env ?? {},
           });
           url = dev.url;
@@ -1288,6 +1288,7 @@ export const _Worker = Resource(
       provisionEventSources(api, {
         scriptName: workerName,
         eventSources: props.eventSources,
+        adopt: props.adopt,
       }),
     );
 
@@ -1490,7 +1491,7 @@ async function provisionContainers(
       }
       return ContainerApplication(container.id, {
         image: container.image,
-        name: container.id,
+        name: container.name,
         instanceType: container.instanceType,
         observability: container.observability,
         durableObjects: {
@@ -1509,6 +1510,7 @@ async function provisionEventSources(
   props: {
     scriptName: string;
     eventSources?: EventSource[];
+    adopt?: boolean;
   },
 ): Promise<QueueConsumer[] | undefined> {
   if (!props.eventSources?.length) {
@@ -1523,6 +1525,7 @@ async function provisionEventSources(
           settings: eventSource.dlq
             ? { deadLetterQueue: eventSource.dlq }
             : undefined,
+          adopt: props.adopt,
           ...normalizeApiOptions(api),
         });
       }
@@ -1531,6 +1534,7 @@ async function provisionEventSources(
           queue: eventSource.queue,
           scriptName: props.scriptName,
           settings: eventSource.settings,
+          adopt: props.adopt,
           ...normalizeApiOptions(api),
         });
       }
@@ -1814,6 +1818,7 @@ function createDevCommand(props: {
   }
   const command = props.command.split(" ");
   const proc = spawn(command[0], command.slice(1), {
+    cwd: props.cwd,
     env: {
       ...process.env,
       ...props.env,
@@ -1839,21 +1844,20 @@ function createDevCommand(props: {
   }
 }
 
-type PutWorkerOptions = WorkerProps & {
+type PutWorkerOptions = Omit<WorkerProps, "entrypoint"> & {
   dispatchNamespace?: string;
   migrationTag?: string;
   workerName: string;
   scriptBundle: WorkerBundle;
-  version: string | undefined;
+  version?: string;
   compatibilityDate: string;
   compatibilityFlags: string[];
-  assetUploadResult:
-    | {
-        completionToken?: string;
-        keepAssets?: boolean;
-        assetConfig?: AssetsConfig;
-      }
-    | undefined;
+  assetUploadResult?: {
+    completionToken?: string;
+    keepAssets?: boolean;
+    assetConfig?: AssetsConfig;
+  };
+  tags?: string[];
   unstable_cacheWorkerSettings?: boolean;
 };
 
