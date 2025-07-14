@@ -63,7 +63,7 @@ await this.replace(true);
 ```
 
 :::tip
-`replace(true)` can cause downtime since a resource is deleted before the new one is create. Downtime can be avoided by a random string to the end of the resource name on the handler level.
+`await this.replace(true)` can cause downtime since a resource is deleted before the new one is created. Downtime can be avoided by appending a random string to the end of the resource name on the handler level, this creates different resource names and avoids the need to destroy the old resource prior to creating the new one.
 
 ```ts
 async function (this, _id, props) {
