@@ -65,24 +65,24 @@ await this.replace(true);
 :::tip
 `replace(true)` can cause downtime since a resource is deleted before the new one is create. Downtime can be avoided by a random string to the end of the resource name on the handler level.
 
-```
-  async function (this, _id, props) {
-    const nameSlug = this.isReplacement
-      ? generateSlug()
-      : (this.output?.nameSlug ?? generateSlug());
-    const name = `${props.name}-${nameSlug}`;
+```ts
+async function (this, _id, props) {
+	const nameSlug = this.isReplacement
+		? generateSlug()
+		: (this.output?.nameSlug ?? generateSlug());
+	const name = `${props.name}-${nameSlug}`;
 
-    if (this.phase === "update") {
-      if (this.output?.name === name) {
-        await this.replace();
-      }
-    }
+	if (this.phase === "update") {
+		if (this.output?.name === name) {
+			await this.replace();
+		}
+	}
 
-    return this({
-        nameSlug,
-        ...props,
-        name,
-    })
-  }
+	return this({
+			nameSlug,
+			...props,
+			name,
+	})
+}
 ```
 :::
