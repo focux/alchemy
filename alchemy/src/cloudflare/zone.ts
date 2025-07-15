@@ -355,10 +355,7 @@ export const Zone = Resource(
       // Update zone settings if provided or apply defaults
       const settingsToApply = {
         ...props.settings,
-        // Always set alwaysUseHttps to "on" unless explicitly set to "off"
-        alwaysUseHttps: (props.settings?.alwaysUseHttps === "off"
-          ? "off"
-          : "on") as AlwaysUseHTTPSValue,
+        alwaysUseHttps: props.settings?.alwaysUseHttps ?? "on",
       };
 
       await updateZoneSettings(api, this.output.id, settingsToApply);
@@ -430,10 +427,7 @@ export const Zone = Resource(
     // Update zone settings if provided or apply defaults
     const settingsToApply = {
       ...props.settings,
-      // Always set alwaysUseHttps to "on" unless explicitly set to "off"
-      alwaysUseHttps: (props.settings?.alwaysUseHttps === "off"
-        ? "off"
-        : "on") as AlwaysUseHTTPSValue,
+      alwaysUseHttps: props.settings?.alwaysUseHttps ?? "on",
     };
 
     await updateZoneSettings(api, zoneData.id, settingsToApply);
