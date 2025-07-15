@@ -49,3 +49,37 @@ const emailConfig = await SES("tracking-config", {
   },
 });
 ```
+
+## Complete Example with Domain Verification
+
+For a complete setup including domain verification with DNS automation:
+
+```ts
+import { SESVerification } from "alchemy/aws";
+
+// Automate domain verification using Cloudflare DNS
+const verification = await SESVerification("example.com-verification", {
+  domain: "example.com",
+  enableDkim: true,
+  enableReceiving: true,
+  apiToken: process.env.CLOUDFLARE_API_TOKEN,
+});
+
+// Create SES configuration set
+const configSet = await SES("production-config", {
+  configurationSetName: "production-emails",
+  sendingOptions: {
+    SendingEnabled: true,
+  },
+  trackingOptions: {
+    CustomRedirectDomain: "click.example.com",
+  },
+});
+
+console.log(`Domain ${verification.domain} verified: ${verification.verified}`);
+console.log(`Email identity ARN: ${verification.emailIdentityArn}`);
+```
+
+## Related Resources
+
+- [SES Verification](/providers/aws/ses-verification) - Automate domain verification with Cloudflare DNS
