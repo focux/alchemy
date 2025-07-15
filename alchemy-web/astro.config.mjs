@@ -33,12 +33,8 @@ export default defineConfig({
       head: [
         {
           tag: "script",
-          content: 'console.log("test script 1");',
-        },
-        {
-          tag: "script",
           content:
-            process.env.NODE_ENV === "production"
+            process.env.ENABLE_POSTHOG === "true"
               ? postHogScript
                   .replace(
                     "<POSTHOG_CLIENT_API_HOST>",
@@ -49,10 +45,6 @@ export default defineConfig({
                     process.env.POSTHOG_PROJECT_ID,
                   )
               : "",
-        },
-        {
-          tag: "script",
-          content: 'console.log("test script 2");',
         },
       ],
       logo: {
