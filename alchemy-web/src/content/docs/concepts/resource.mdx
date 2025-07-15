@@ -166,7 +166,7 @@ return this.create({/* updated properties */});
 ```
 :::
 
-# Adoption
+## Adoption
 
 When creating a resource, Alchemy will fail if a resource with the same name already exists. Resource adoption allows you to opt in to using the pre-existing resource instead.
 
@@ -187,7 +187,7 @@ During the **create phase**, if a resource already exists:
 - **Without adoption** (default): Throws an "already exists" error
 - **With adoption**: Finds and adopts the existing resource
 
-# Replacement
+## Replacement
 
 Sometimes it's impossible to UPDATE a resource (e.g., you cannot rename an R2 Bucket). In these cases, you need to perform a REPLACE operation to:
 
