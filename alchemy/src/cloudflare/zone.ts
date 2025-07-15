@@ -74,7 +74,7 @@ export interface ZoneProps extends CloudflareApiOptions {
     /**
      * Enable Always Use HTTPS
      * Redirects all HTTP traffic to HTTPS
-     * @default "off"
+     * @default "on" (unless explicitly set to "off")
      */
     alwaysUseHttps?: AlwaysUseHTTPSValue;
 
@@ -352,12 +352,18 @@ export const Zone = Resource(
       const zoneData = ((await response.json()) as { result: CloudflareZone })
         .result;
 
-      // Update zone settings if provided
-      if (props.settings) {
-        await updateZoneSettings(api, this.output.id, props.settings);
-        // Add a small delay to ensure settings are propagated
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
+      // Update zone settings if provided or apply defaults
+      const settingsToApply = {
+        ...props.settings,
+        // Always set alwaysUseHttps to "on" unless explicitly set to "off"
+        alwaysUseHttps: (props.settings?.alwaysUseHttps === "off"
+          ? "off"
+          : "on") as AlwaysUseHTTPSValue,
+      };
+
+      await updateZoneSettings(api, this.output.id, settingsToApply);
+      // Add a small delay to ensure settings are propagated
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
       return this({
         id: zoneData.id,
@@ -421,12 +427,18 @@ export const Zone = Resource(
       zoneData = (JSON.parse(body) as { result: CloudflareZone }).result;
     }
 
-    // Update zone settings if provided
-    if (props.settings) {
-      await updateZoneSettings(api, zoneData.id, props.settings);
-      // Add a small delay to ensure settings are propagated
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+    // Update zone settings if provided or apply defaults
+    const settingsToApply = {
+      ...props.settings,
+      // Always set alwaysUseHttps to "on" unless explicitly set to "off"
+      alwaysUseHttps: (props.settings?.alwaysUseHttps === "off"
+        ? "off"
+        : "on") as AlwaysUseHTTPSValue,
+    };
+
+    await updateZoneSettings(api, zoneData.id, settingsToApply);
+    // Add a small delay to ensure settings are propagated
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     return this({
       id: zoneData.id,
