@@ -352,32 +352,10 @@ export const Zone = Resource(
       const zoneData = ((await response.json()) as { result: CloudflareZone })
         .result;
 
-      // Update zone settings if provided or apply defaults
-      const settingsToApply = {
-        ...props.settings,
-        alwaysUseHttps: props.settings?.alwaysUseHttps ?? "on",
-      };
+      // Apply zone settings with defaults and wait for propagation
+      await applyZoneSettingsWithDefaults(api, this.output.id, props.settings);
 
-      await updateZoneSettings(api, this.output.id, settingsToApply);
-      // Add a small delay to ensure settings are propagated
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      return this({
-        id: zoneData.id,
-        name: zoneData.name,
-        type: zoneData.type,
-        status: zoneData.status,
-        paused: zoneData.paused,
-        accountId: zoneData.account.id,
-        nameservers: zoneData.name_servers,
-        originalNameservers: zoneData.original_name_servers,
-        createdAt: new Date(zoneData.created_on).getTime(),
-        modifiedAt: new Date(zoneData.modified_on).getTime(),
-        activatedAt: zoneData.activated_on
-          ? new Date(zoneData.activated_on).getTime()
-          : null,
-        settings: await getZoneSettings(api, zoneData.id),
-      });
+      return this(await buildZoneOutput(api, zoneData));
     }
     // Create new zone
 
@@ -424,40 +402,62 @@ export const Zone = Resource(
       zoneData = (JSON.parse(body) as { result: CloudflareZone }).result;
     }
 
-    // Update zone settings if provided or apply defaults
-    const settingsToApply = {
-      ...props.settings,
-      alwaysUseHttps: props.settings?.alwaysUseHttps ?? "on",
-    };
+    // Apply zone settings with defaults and wait for propagation
+    await applyZoneSettingsWithDefaults(api, zoneData.id, props.settings);
 
-    await updateZoneSettings(api, zoneData.id, settingsToApply);
-    // Add a small delay to ensure settings are propagated
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    return this({
-      id: zoneData.id,
-      name: zoneData.name,
-      type: zoneData.type,
-      status: zoneData.status,
-      paused: zoneData.paused,
-      accountId: zoneData.account.id,
-      nameservers: zoneData.name_servers,
-      originalNameservers: zoneData.original_name_servers,
-      createdAt: new Date(zoneData.created_on).getTime(),
-      modifiedAt: new Date(zoneData.modified_on).getTime(),
-      activatedAt: zoneData.activated_on
-        ? new Date(zoneData.activated_on).getTime()
-        : null,
-      settings: await getZoneSettings(api, zoneData.id),
-    });
+    return this(await buildZoneOutput(api, zoneData));
   },
 );
+
+/**
+ * Helper function to apply zone settings with defaults and wait for propagation
+ */
+async function applyZoneSettingsWithDefaults(
+  api: CloudflareApi,
+  zoneId: string,
+  settings: ZoneProps["settings"],
+): Promise<void> {
+  // Apply defaults to settings
+  const settingsToApply = {
+    ...settings,
+    alwaysUseHttps: settings?.alwaysUseHttps ?? "on",
+  };
+
+  await updateZoneSettings(api, zoneId, settingsToApply);
+  // Add a small delay to ensure settings are propagated
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+}
+
+/**
+ * Helper function to build zone output object from CloudflareZone data
+ */
+async function buildZoneOutput(
+  api: CloudflareApi,
+  zoneData: CloudflareZone,
+): Promise<Zone> {
+  return {
+    id: zoneData.id,
+    name: zoneData.name,
+    type: zoneData.type,
+    status: zoneData.status,
+    paused: zoneData.paused,
+    accountId: zoneData.account.id,
+    nameservers: zoneData.name_servers,
+    originalNameservers: zoneData.original_name_servers,
+    createdAt: new Date(zoneData.created_on).getTime(),
+    modifiedAt: new Date(zoneData.modified_on).getTime(),
+    activatedAt: zoneData.activated_on
+      ? new Date(zoneData.activated_on).getTime()
+      : null,
+    settings: await getZoneSettings(api, zoneData.id),
+  };
+}
 
 /**
  * Helper function to update zone settings
  */
 async function updateZoneSettings(
-  api: any,
+  api: CloudflareApi,
   zoneId: string,
   settings: ZoneProps["settings"],
 ): Promise<void> {
@@ -514,7 +514,7 @@ async function updateZoneSettings(
  * Helper function to get current zone settings
  */
 async function getZoneSettings(
-  api: any,
+  api: CloudflareApi,
   zoneId: string,
 ): Promise<Zone["settings"]> {
   const settingsResponse = await api.get(`/zones/${zoneId}/settings`);
