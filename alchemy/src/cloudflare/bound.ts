@@ -1,4 +1,5 @@
 import type { Pipeline } from "cloudflare:pipelines";
+import type { WorkflowEntrypoint } from "cloudflare:workers";
 import type { Secret } from "../secret.ts";
 import type { AiGatewayResource as _AiGateway } from "./ai-gateway.ts";
 import type { Ai as _Ai } from "./ai.ts";
@@ -22,6 +23,9 @@ import type { VersionMetadata as _VersionMetadata } from "./version-metadata.ts"
 import type { WorkerStub } from "./worker-stub.ts";
 import type { Worker as _Worker, WorkerRef } from "./worker.ts";
 import type { Workflow as _Workflow } from "./workflow.ts";
+
+export type WorkflowParamsOf<T extends WorkflowEntrypoint<any>> =
+  T extends WorkflowEntrypoint<infer P> ? P : never;
 
 type BoundWorker<
   RPC extends Rpc.WorkerEntrypointBranded = Rpc.WorkerEntrypointBranded,
@@ -61,7 +65,7 @@ export type Bound<T extends Binding> = T extends _DurableObjectNamespace<
                       : T extends Assets
                         ? Service
                         : T extends _Workflow<infer P>
-                          ? Workflow<P>
+                          ? Workflow<WorkflowParamsOf<P>>
                           : T extends D1DatabaseResource
                             ? D1Database
                             : T extends DispatchNamespaceResource

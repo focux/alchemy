@@ -1,6 +1,7 @@
 import { handleApiError } from "./api-error.ts";
 import type { CloudflareApi } from "./api.ts";
 import type { Binding } from "./bindings.ts";
+import type { WorkflowEntrypoint } from "cloudflare:workers";
 
 export interface WorkflowProps {
   /**
@@ -34,13 +35,15 @@ export interface WorkflowProps {
   };
 }
 
-export type Workflow<PARAMS = unknown> = {
+export type Workflow<
+  T extends WorkflowEntrypoint<any> = WorkflowEntrypoint<any>,
+> = {
   type: "workflow";
   /**
-   * Phantom property to preserve workflow params at the type level.
+   * Phantom property to preserve workflow entrypoint class at the type level.
    * No value exists.
    */
-  _PARAMS: PARAMS;
+  _PARAMS: T;
   id: string;
   workflowName: string;
   className: string;
@@ -63,10 +66,9 @@ export function isWorkflow(binding: Binding): binding is Workflow {
  * });
  * ```
  */
-export function Workflow<PARAMS = unknown>(
-  id: string,
-  props: WorkflowProps = {},
-): Workflow<PARAMS> {
+export function Workflow<
+  T extends WorkflowEntrypoint<any> = WorkflowEntrypoint<any>,
+>(id: string, props: WorkflowProps = {}): Workflow<T> {
   const workflowName = props.workflowName ?? props.className ?? id;
   const className = props.className ?? workflowName;
 
