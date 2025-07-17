@@ -233,7 +233,7 @@ const app = await alchemy("app");
 await app.finalize(); // finalize scopes by deleting "orphaned" and "replaced" resources
 ```
 
-## Immediate replacement
+### Immediate replacement
 
 It is sometimes required to destory the old resource before creating the one, e.g. when updating a resource that requires a unique name.
 
