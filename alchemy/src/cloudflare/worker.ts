@@ -388,6 +388,16 @@ export interface BaseWorkerProps<
      */
     mode: "smart";
   };
+
+  limits?: {
+    /**
+     * The maximum CPU time in milliseconds that the worker can use.
+     *
+     * @see https://developers.cloudflare.com/workers/platform/limits/#cpu-time
+     * @default 30_000 (30 seconds)
+     */
+    cpu_ms?: number;
+  };
 }
 
 export interface InlineWorkerProps<
@@ -1100,6 +1110,7 @@ export const _Worker = Resource(
           bindings: props.bindings,
           bundle,
           port: props.dev?.port,
+          assets: props.assets,
         });
       }
 
@@ -1126,6 +1137,8 @@ export const _Worker = Resource(
         crons: props.crons,
         // Include placement configuration in the output
         placement: props.placement,
+        // Include limits configuration in the output
+        limits: props.limits,
         // phantom property
         Env: undefined!,
       } as unknown as Worker<B>);
@@ -1420,6 +1433,8 @@ export const _Worker = Resource(
       version: props.version,
       // Include placement configuration in the output
       placement: props.placement,
+      // Include limits configuration in the output
+      limits: props.limits,
       // phantom property
       Env: undefined!,
     } as unknown as Worker<B>);
@@ -1669,6 +1684,7 @@ async function createMiniflare(props: {
   bindings: Bindings | undefined;
   port: number | undefined;
   bundle: WorkerBundleProvider;
+  assets: AssetsConfig | undefined;
 }) {
   const sharedOptions: Omit<MiniflareWorkerOptions, "bundle"> = {
     name: props.workerName,
@@ -1676,6 +1692,7 @@ async function createMiniflare(props: {
     compatibilityFlags: props.compatibilityFlags,
     bindings: props.bindings,
     port: props.port,
+    assets: props.assets,
   };
 
   const startPromise = new DeferredPromise<string>();
@@ -1835,14 +1852,6 @@ async function createDevCommand(props: {
     }
   }
   const command = props.command.split(" ");
-  console.log({
-    command,
-    args: command.slice(1),
-    cwd: props.cwd,
-    env: {
-      ...props.env,
-    },
-  });
   const proc = spawn(command[0], command.slice(1), {
     cwd: props.cwd,
     env: {
