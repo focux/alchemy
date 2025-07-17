@@ -60,6 +60,10 @@
       "bun": "./src/cloudflare/index.ts",
       "import": "./lib/cloudflare/index.js"
     },
+    "./coolify": {
+      "bun": "./src/coolify/index.ts",
+      "import": "./lib/coolify/index.js"
+    },
     "./dns": {
       "bun": "./src/dns/index.ts",
       "import": "./lib/dns/index.js"

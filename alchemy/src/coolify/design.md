@@ -155,6 +155,48 @@ console.log(deployKey.fingerprint); // SSH fingerprint
 **Replace Required When**:
 - Private key content changes (immutable field)
 
+**Test Cases**:
+
+#### Create New PrivateKey
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| No existing keys | `name: "deploy-key"`, `privateKey: "-----BEGIN RSA..."`, `description: "Deploy key"` | New private key created in Coolify | `privateKeyId: "uuid-123"`, `publicKey: "ssh-rsa AAAA..."`, `fingerprint: "SHA256:abc..."` |
+
+#### Create with Invalid Key
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| No existing keys | `name: "bad-key"`, `privateKey: "invalid-content"` | Validation error | Error: "Invalid SSH private key format" |
+
+#### Adopt Existing PrivateKey by Name
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Existing key with name "deploy-key" | `name: "deploy-key"`, `privateKey: "-----BEGIN RSA..."`, `adopt: true` | Find existing key, verify fingerprint matches | `privateKeyId: "existing-uuid"`, `publicKey: "ssh-rsa AAAA..."`, `fingerprint: "SHA256:abc..."` |
+
+#### Adopt with Mismatched Fingerprint
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Existing key with name "deploy-key" but different content | `name: "deploy-key"`, `privateKey: "-----DIFFERENT KEY..."`, `adopt: true` | Adoption fails due to fingerprint mismatch | Error: "Cannot adopt private key: fingerprint mismatch" |
+
+#### Update PrivateKey Name
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Existing key with `name: "old-name"` | `name: "new-name"`, same privateKey content | Name updated via PATCH | `privateKeyId: "uuid-123"`, `name: "new-name"`, unchanged fingerprint |
+
+#### Update PrivateKey Content (Immutable)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Existing key with fingerprint "SHA256:abc..." | Different privateKey content | Update rejected | Error: "Cannot change private key content. Private keys are immutable after creation." |
+
+#### Delete PrivateKey (No Dependencies)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Existing key not referenced by any resources | Delete operation | Key deleted from Coolify | Success |
+
+#### Delete PrivateKey (With Dependencies)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Existing key referenced by server "prod-1" | Delete operation | Deletion blocked | Error: "Cannot delete private key: referenced by resources (Server: prod-1)" |
+
 ### 2. Server
 
 **Description**: Represents a physical or virtual machine that hosts Coolify workloads.
@@ -287,6 +329,53 @@ console.log(prodServer.validated); // true/false
 - IP address changes
 - Port changes
 
+**Test Cases**:
+
+#### Create New Server
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Private key exists | `name: "prod-server"`, `ip: "192.168.1.100"`, `privateKey: key`, `instantValidate: true` | Server created and validated | `serverId: "uuid-456"`, `serverName: "prod-server"`, `validated: true`, `proxyStatus: "running"` |
+
+#### Create Server with Custom Port
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Private key exists | `name: "custom-server"`, `ip: "10.0.0.50"`, `port: 2222`, `user: "deploy"` | Server created with custom SSH settings | `serverId: "uuid-789"`, `port: 2222`, `user: "deploy"` |
+
+#### Adopt Existing Server by IP:Port
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server exists at 192.168.1.100:22 | `ip: "192.168.1.100"`, `port: 22`, `adopt: true` | Find and adopt existing server | `serverId: "existing-uuid"`, existing server details |
+
+#### Adopt with User Mismatch
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server exists with user "root" | `ip: "192.168.1.100"`, `user: "admin"`, `adopt: true` | Adoption fails | Error: "Cannot adopt server: user mismatch (existing: root, requested: admin)" |
+
+#### Update Server Name
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server with `name: "old-server"` | `name: "new-server"`, same IP/port | Name updated | `serverId: "uuid-456"`, `serverName: "new-server"` |
+
+#### Update Server IP (Immutable)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server with `ip: "192.168.1.100"` | `ip: "192.168.1.101"` | Update rejected | Error: "Cannot change server IP from '192.168.1.100' to '192.168.1.101'. IP is immutable after creation." |
+
+#### Update Server Private Key
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server with privateKey "key-1" | `privateKey: "key-2"` | Key updated, server re-validated | `validated: true` after re-validation |
+
+#### Delete Server (No Resources)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server with no applications/databases/services | Delete operation | Server deleted | Success |
+
+#### Delete Server (With Resources)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server hosting app "web-1", database "db-1" | Delete operation | Deletion blocked | Error: "Cannot delete server prod-server: has active resources (Application: web-1, Database: db-1)" |
+
 ### 3. Team
 
 **Description**: Organizational unit for multi-tenancy and access control.
@@ -361,6 +450,38 @@ console.log(devTeam.currentTeam); // true if this is the active team
 
 **Replace Required When**:
 - Never (all fields that can be changed are updateable)
+
+**Test Cases**:
+
+#### Adopt Existing Team
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Team "Development" exists | `name: "Development"`, `adopt: true` | Find and adopt team | `teamId: "team-uuid"`, `teamName: "Development"`, `currentTeam: false` |
+
+#### Adopt Current Team
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Current team is "Production" | `name: "Production"`, `adopt: true` | Find and adopt current team | `teamId: "current-uuid"`, `teamName: "Production"`, `currentTeam: true` |
+
+#### Create Team (Not Supported)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| No team "NewTeam" exists | `name: "NewTeam"`, `adopt: false` | Creation fails | Error: "Team creation is not available via API. Teams must be created through the Coolify UI." |
+
+#### Adopt Non-Existent Team
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| No team "Missing" exists | `name: "Missing"`, `adopt: true` | Adoption fails | Error: "Team 'Missing' not found. Available teams: Development, Production" |
+
+#### Update Team (Limited)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Team with `customServerLimit: 5` | `customServerLimit: 10` | Limit updated (if API supports) | `customServerLimit: 10` |
+
+#### Delete Team (With Projects)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Team has projects "web", "api" | Delete operation | Deletion blocked | Error: "Cannot delete team: has projects (web, api)" |
 
 ### 4. Project
 
@@ -464,6 +585,43 @@ console.log(webProject.environments); // ["production"] - default env
 **Replace Required When**:
 - Team changes (not supported - must recreate)
 
+**Test Cases**:
+
+#### Create New Project
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Team exists | `name: "web-app"`, `description: "Web application"`, `team: team` | Project created with default environment | `projectId: "proj-uuid"`, `projectName: "web-app"`, `environments: ["production"]` |
+
+#### Create Project (Default Team)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Current team is "Development" | `name: "api-service"` | Project created in current team | `projectId: "proj-uuid-2"`, team association with current |
+
+#### Adopt Existing Project
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Project "web-app" exists in team | `name: "web-app"`, `adopt: true` | Find and adopt project | `projectId: "existing-proj"`, existing project details |
+
+#### Update Project Name
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Project with `name: "old-project"` | `name: "new-project"` | Name updated | `projectName: "new-project"` |
+
+#### Update Project Team (Immutable)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Project in team "Development" | `team: "Production"` | Update rejected | Error: "Team association cannot be changed after project creation" |
+
+#### Delete Empty Project
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Project with empty environments | Delete operation | Project deleted | Success |
+
+#### Delete Project with Resources
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Project has app in "production" environment | Delete operation | Deletion blocked | Error: "Cannot delete project: environment 'production' has resources" |
+
 ### 5. Environment
 
 **Description**: Deployment contexts within a project (e.g., dev, staging, production).
@@ -508,6 +666,18 @@ const app = await Application("my-app", {
 
 **Replace Required When**:
 - Not applicable (managed through parent project)
+
+**Test Cases**:
+
+#### Auto-Create Environment
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Project exists, no "staging" env | Application created with `environment: "staging"` | Environment auto-created | Environment "staging" created |
+
+#### Reference Existing Environment
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| "production" environment exists | Application created with `environment: "production"` | Use existing environment | No new environment created |
 
 ### 6. Application
 
@@ -710,6 +880,54 @@ console.log(publicApp.status); // "running"
 - Project or Environment changes
 - Application type changes
 
+**Test Cases**:
+
+#### Create Public Git Application
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project exist | `type: "public"`, `gitRepository: "https://github.com/user/repo"`, `gitBranch: "main"` | App created and deployed | `applicationId: "app-uuid"`, `fqdn: "app-uuid.coolify.io"`, `status: "running"` |
+
+#### Create Private Git Application
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project, deploy key exist | `type: "private-deploy-key"`, `gitRepository: "git@github.com:user/repo"`, `privateKey: key` | App created with SSH auth | `applicationId: "app-uuid-2"`, deployment triggered |
+
+#### Create Docker Image Application
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project exist | `type: "docker-image"`, `dockerImage: "nginx:latest"` | App created from image | `applicationId: "app-uuid-3"`, container started |
+
+#### Adopt Existing Application
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| App "frontend" exists in project/env | `name: "frontend"`, `adopt: true`, same type | Find and adopt app | `applicationId: "existing-app"`, existing config |
+
+#### Adopt with Type Mismatch
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Git app "frontend" exists | `name: "frontend"`, `type: "docker-image"`, `adopt: true` | Adoption fails | Error: "Cannot adopt application: type mismatch (existing: public, requested: docker-image)" |
+
+#### Update Application Git Branch
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| App with `gitBranch: "main"` | `gitBranch: "develop"` | Branch updated, redeploy triggered | `gitBranch: "develop"`, new deployment started |
+
+#### Update Application Server (Immutable)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| App on server "server-1" | `server: "server-2"` | Update rejected | Error: "Cannot change application server. Recreate the application on the new server." |
+
+#### Start/Stop Application
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| App with `status: "stopped"` | Start operation | Container started | `status: "running"` |
+| App with `status: "running"` | Stop operation | Container stopped | `status: "stopped"` |
+
+#### Delete Application
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| App exists with domains, env vars | Delete operation | App stopped, resources cleaned | Success, domains and volumes removed |
+
 ### 7. Database
 
 **Description**: Managed database instances.
@@ -893,6 +1111,38 @@ console.log(mongo.publicUrl); // Public connection string (if exposed)
 - Project or Environment changes
 - Major version upgrades (e.g., PostgreSQL 14 to 15)
 
+**Test Cases**:
+
+#### Create PostgreSQL Database
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project exist | `type: "postgresql"`, `version: "15"`, `databaseName: "myapp"` | Database created and started | `databaseId: "db-uuid"`, `internalUrl: "postgresql://user:pass@db-uuid:5432/myapp"` |
+
+#### Create Public Redis
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project exist | `type: "redis"`, `isPublic: true`, `publicPort: 6379` | Redis exposed publicly | `publicUrl: "redis://server-ip:6379"` |
+
+#### Adopt Existing Database
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| PostgreSQL "main-db" exists | `name: "main-db"`, `type: "postgresql"`, `adopt: true` | Find and adopt database | `databaseId: "existing-db"`, existing config |
+
+#### Update Database Memory Limit
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| DB with 2GB memory | `limits: { memory: "4096M" }` | Memory limit updated, DB restarted | `limits.memory: "4096M"` |
+
+#### Update Database Type (Immutable)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| PostgreSQL database | `type: "mysql"` | Update rejected | Error: "Cannot change database type from postgresql to mysql" |
+
+#### Delete Database
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Database with data volume | Delete operation | Backup created (if enabled), database removed | Success, volume deleted |
+
 ### 8. Service
 
 **Description**: Docker Compose based services or one-click deployments.
@@ -1071,6 +1321,38 @@ console.log(customService.services); // Status of individual containers
 - Server changes
 - Project or Environment changes
 
+**Test Cases**:
+
+#### Create Predefined Service
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project exist | `type: "plausible"`, `name: "analytics"` | Plausible Analytics deployed | `serviceId: "svc-uuid"`, multiple containers started |
+
+#### Create Custom Docker Compose Service
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Server, project exist | `type: "custom"`, `dockerComposeRaw: "version: '3.8'..."` | Custom stack deployed | `serviceId: "svc-uuid-2"`, `services: { web: "running", db: "running" }` |
+
+#### Adopt Existing Service
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Service "analytics" exists | `name: "analytics"`, `adopt: true` | Find and adopt service | `serviceId: "existing-svc"` |
+
+#### Update Service Environment Variables
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Service with env vars | `environmentVariables: { NEW_VAR: "value" }` | Env vars updated, containers restarted | New env vars applied |
+
+#### Update Service Type (Special Case)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Predefined "plausible" service | `type: "custom"`, `dockerComposeRaw: "..."` | Convert to custom service | Service recreated as custom |
+
+#### Delete Service
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Service with multiple containers | Delete operation | All containers stopped, networks removed | Success |
+
 ### 9. Deployment
 
 **Description**: Represents a deployment of an application.
@@ -1177,6 +1459,38 @@ const idempotentDeploy = await Deployment("deploy-idempotent", {
 
 **Replace Required When**:
 - Not applicable (deployments are immutable)
+
+**Test Cases**:
+
+#### Create Deployment (Latest)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Application configured | `application: app` | Deploy from configured branch | `deploymentId: "deploy-uuid"`, `status: "queued"` → "in_progress" → "success" |
+
+#### Create Deployment (Specific Tag)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Application with tags | `application: app`, `tag: "v1.2.3"` | Deploy specific version | `deploymentId: "deploy-uuid-2"`, tag "v1.2.3" deployed |
+
+#### Force Deployment
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| No changes in repository | `application: app`, `force: true` | Deploy despite no changes | New deployment created |
+
+#### Adopt Existing Deployment (Idempotency)
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Successful deployment for tag "v1.2.3" | `tag: "v1.2.3"`, `adopt: true` | Return existing deployment | `deploymentId: "existing-deploy"`, no new deployment |
+
+#### Failed Deployment
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Build error in application | `application: app` | Deployment fails | `status: "failed"`, error in logs |
+
+#### Deployment History
+| Current State | Input | Expected Effect | Output |
+|--------------|--------|-----------------|---------|
+| Multiple deployments exist | List deployments for app | Return deployment history | Array of deployments with timestamps |
 
 ## Utility Endpoints
 
