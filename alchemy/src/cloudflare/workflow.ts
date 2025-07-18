@@ -1,7 +1,7 @@
+import type { WorkflowEntrypoint } from "cloudflare:workers";
 import { handleApiError } from "./api-error.ts";
 import type { CloudflareApi } from "./api.ts";
 import type { Binding } from "./bindings.ts";
-import type { WorkflowEntrypoint } from "cloudflare:workers";
 
 export interface WorkflowProps {
   /**
@@ -40,14 +40,27 @@ export type Workflow<
 > = {
   type: "workflow";
   /**
+   * The unique identifier for the workflow binding.
+   */
+  id: string;
+  /**
+   * The name of the workflow. This is used to identify the workflow within the system.
+   */
+  workflowName: string;
+  /**
+   * The name of the class that implements the workflow logic.
+   */
+  className: string;
+  /**
+   * (Optional) The name of the script containing the workflow implementation.
+   */
+  scriptName?: string;
+  /**
    * Phantom property to preserve workflow entrypoint class at the type level.
    * No value exists.
+   * @internal
    */
-  _PARAMS: T;
-  id: string;
-  workflowName: string;
-  className: string;
-  scriptName?: string;
+  __phantom__: T;
 };
 
 export function isWorkflow(binding: Binding): binding is Workflow {
@@ -74,7 +87,7 @@ export function Workflow<
 
   return {
     type: "workflow",
-    _PARAMS: undefined!,
+    __phantom__: undefined!,
     id,
     workflowName,
     className,

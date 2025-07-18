@@ -25,9 +25,6 @@ import type { WorkerStub } from "./worker-stub.ts";
 import type { Worker as _Worker, WorkerRef } from "./worker.ts";
 import type { Workflow as _Workflow } from "./workflow.ts";
 
-export type WorkflowParamsOf<T extends WorkflowEntrypoint<any>> =
-  T extends WorkflowEntrypoint<infer P> ? P : never;
-
 type BoundWorker<
   RPC extends Rpc.WorkerEntrypointBranded = Rpc.WorkerEntrypointBranded,
 > = Service<RPC> & {
@@ -65,8 +62,10 @@ export type Bound<T extends Binding> = T extends _DurableObjectNamespace<
                       ? CryptoKey
                       : T extends Assets
                         ? Service
-                        : T extends _Workflow<infer P>
-                          ? Workflow<WorkflowParamsOf<P>>
+                        : T extends _Workflow<infer WF>
+                          ? WF extends WorkflowEntrypoint<any, infer Params>
+                            ? Workflow<Params>
+                            : never
                           : T extends D1DatabaseResource
                             ? D1Database
                             : T extends DispatchNamespaceResource
