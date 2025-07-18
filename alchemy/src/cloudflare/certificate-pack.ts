@@ -318,37 +318,27 @@ export const CertificatePack = Resource(
       const currentPack = this.output;
 
       if (props.certificateAuthority !== currentPack.certificateAuthority) {
-        throw new Error(
-          `Cannot change certificateAuthority from '${currentPack.certificateAuthority}' to '${props.certificateAuthority}'. Certificate Authority is immutable after creation. You must delete and recreate the certificate pack.`,
-        );
+        this.replace();
       }
 
       if (
         JSON.stringify(props.hosts.sort()) !==
         JSON.stringify(currentPack.hosts.sort())
       ) {
-        throw new Error(
-          `Cannot change hosts from [${currentPack.hosts.join(", ")}] to [${props.hosts.join(", ")}]. Hosts are immutable after creation. You must delete and recreate the certificate pack.`,
-        );
+        this.replace();
       }
 
       if (props.validationMethod !== currentPack.validationMethod) {
-        throw new Error(
-          `Cannot change validationMethod from '${currentPack.validationMethod}' to '${props.validationMethod}'. Validation method is immutable after creation. You must delete and recreate the certificate pack.`,
-        );
+        this.replace();
       }
 
       if (props.validityDays !== currentPack.validityDays) {
-        throw new Error(
-          `Cannot change validityDays from ${currentPack.validityDays} to ${props.validityDays}. Validity period is immutable after creation. You must delete and recreate the certificate pack.`,
-        );
+        this.replace();
       }
 
       const type = props.type || "advanced";
       if (type !== currentPack.type) {
-        throw new Error(
-          `Cannot change type from '${currentPack.type}' to '${type}'. Type is immutable after creation. You must delete and recreate the certificate pack.`,
-        );
+        this.replace();
       }
 
       // Only cloudflareBranding can be updated
