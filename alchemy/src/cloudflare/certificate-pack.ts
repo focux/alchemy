@@ -314,86 +314,7 @@ export const CertificatePack = Resource(
     }
 
     if (this.phase === "update" && this.output?.id) {
-      // Validate immutable properties
-      const currentPack = this.output;
-
-      if (props.certificateAuthority !== currentPack.certificateAuthority) {
-        this.replace();
-      }
-
-      if (
-        JSON.stringify(props.hosts.sort()) !==
-        JSON.stringify(currentPack.hosts.sort())
-      ) {
-        this.replace();
-      }
-
-      if (props.validationMethod !== currentPack.validationMethod) {
-        this.replace();
-      }
-
-      if (props.validityDays !== currentPack.validityDays) {
-        this.replace();
-      }
-
-      const type = props.type || "advanced";
-      if (type !== currentPack.type) {
-        this.replace();
-      }
-
-      // Only cloudflareBranding can be updated
-      if (props.cloudflareBranding !== currentPack.cloudflareBranding) {
-        logger.log(
-          `Updating certificate pack cloudflare branding from ${currentPack.cloudflareBranding} to ${props.cloudflareBranding}`,
-        );
-
-        const updateResponse = await api.patch(
-          `/zones/${zoneId}/ssl/certificate_packs/${this.output.id}`,
-          {
-            cloudflare_branding: props.cloudflareBranding || false,
-          },
-        );
-
-        if (!updateResponse.ok) {
-          await handleApiError(
-            updateResponse,
-            "update",
-            "certificate pack",
-            this.output.id,
-          );
-        }
-      }
-
-      // Get updated certificate pack details
-      const response = await api.get(
-        `/zones/${zoneId}/ssl/certificate_packs/${this.output.id}`,
-      );
-
-      if (!response.ok) {
-        await handleApiError(
-          response,
-          "get",
-          "certificate pack",
-          this.output.id,
-        );
-      }
-
-      const updatedPack = (
-        (await response.json()) as { result: CloudflareCertificatePack }
-      ).result;
-
-      return this({
-        id: updatedPack.id,
-        certificateAuthority: updatedPack.certificate_authority,
-        cloudflareBranding: updatedPack.cloudflare_branding,
-        hosts: updatedPack.hosts,
-        status: updatedPack.status,
-        type: updatedPack.type,
-        validationMethod: updatedPack.validation_method,
-        validityDays: updatedPack.validity_days,
-        zoneId: updatedPack.zone_id,
-        zoneName: zoneName,
-      });
+      this.replace();
     }
 
     // Create new certificate pack
@@ -488,7 +409,7 @@ export const CertificatePack = Resource(
     return this({
       id: createdPack.id,
       certificateAuthority: createdPack.certificate_authority,
-      cloudflareBranding: createdPack.cloudflare_branding,
+      cloudflareBranding: props.cloudflareBranding ?? false,
       hosts: createdPack.hosts,
       status: createdPack.status,
       type: createdPack.type,
