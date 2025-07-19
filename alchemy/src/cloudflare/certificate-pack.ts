@@ -349,13 +349,13 @@ export const CertificatePack = Resource(
       return this({
         id: existingPack.id,
         certificateAuthority: existingPack.certificate_authority,
-        cloudflareBranding: existingPack.cloudflare_branding,
+        cloudflareBranding: props.cloudflareBranding ?? false,
         hosts: existingPack.hosts,
         status: existingPack.status,
         type: existingPack.type,
         validationMethod: existingPack.validation_method,
         validityDays: existingPack.validity_days,
-        zoneId: existingPack.zone_id,
+        zoneId,
         zoneName: zoneName,
       });
     }
@@ -415,7 +415,7 @@ export const CertificatePack = Resource(
       type: createdPack.type,
       validationMethod: createdPack.validation_method,
       validityDays: createdPack.validity_days,
-      zoneId: createdPack.zone_id,
+      zoneId,
       zoneName: zoneName,
     });
   },
@@ -427,13 +427,11 @@ export const CertificatePack = Resource(
 interface CloudflareCertificatePack {
   id: string;
   certificate_authority: CertificateAuthority;
-  cloudflare_branding: boolean;
   hosts: string[];
   status: CertificatePackStatus;
   type: "advanced";
   validation_method: ValidationMethod;
   validity_days: ValidityDays;
-  zone_id: string;
 }
 
 /**
@@ -595,6 +593,16 @@ async function findMatchingCertificatePack(
       // Check if all requested hosts are covered by this certificate pack
       const packHosts = new Set(pack.hosts);
       const allHostsCovered = props.hosts.every((host) => packHosts.has(host));
+
+      // If Cloudflare branding is enabled, ensure that the cert pack is cloudflare branded`
+      if (
+        props.cloudflareBranding &&
+        !Array.from(packHosts).some((host) =>
+          host.endsWith("sni.cloudflaressl.com"),
+        )
+      ) {
+        continue;
+      }
 
       if (allHostsCovered) {
         logger.log(

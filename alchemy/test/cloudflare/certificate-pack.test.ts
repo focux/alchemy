@@ -19,9 +19,11 @@ const test = alchemy.test(import.meta, {
 
 describe
   .skipIf(!process.env.ALL_TESTS)
+  //* we use sequential because we don't want to worry about collisions
+  //* normally we make custom names but acm only works with real zones
   .sequential("CertificatePack Resource", () => {
     // Use BRANCH_PREFIX for deterministic, non-colliding resource names
-    const testDomain = "pear.so";
+    const testDomain = process.env.TEST_CERTIFICATE_DOMAIN ?? "cert-test.dev";
 
     test("create, and delete certificate pack", async (scope) => {
       let zone: Zone | undefined;
@@ -113,7 +115,6 @@ describe
           },
         );
 
-        console.log("A", certificatePack.id);
         expect(certificatePack.id).toBeTruthy();
 
         // Try to update certificate authority (should fail)
@@ -128,7 +129,6 @@ describe
           },
         );
 
-        console.log("B", certificatePack.id);
         expect(certificatePack.certificateAuthority).toEqual("google");
 
         // Try to update hosts (should fail)
@@ -143,7 +143,6 @@ describe
           },
         );
 
-        console.log("C", certificatePack.id);
         expect(certificatePack.hosts).toEqual([
           `test.${testDomain}`,
           `www.test.${testDomain}`,
@@ -182,16 +181,21 @@ describe
             certificateAuthority: "lets_encrypt",
             hosts: [testDomain, `*.${testDomain}`],
             validationMethod: "txt",
-            validityDays: 30,
+            validityDays: 90,
             cloudflareBranding: true,
           },
         );
 
         expect(certificatePack.id).toBeTruthy();
         expect(certificatePack.zoneId).toEqual(zone.id);
-        expect(certificatePack.hosts).toEqual([testDomain, `*.${testDomain}`]);
-        expect(certificatePack.validityDays).toEqual(30);
-        expect(certificatePack.cloudflareBranding).toEqual(true);
+        expect(certificatePack.hosts).toEqual(
+          expect.arrayContaining([
+            testDomain,
+            `*.${testDomain}`,
+            expect.stringContaining("sni.cloudflaressl.com"),
+          ]),
+        );
+        expect(certificatePack.validityDays).toEqual(90);
 
         // Verify with API
         const getResponse = await api.get(
@@ -200,12 +204,14 @@ describe
         expect(getResponse.status).toEqual(200);
 
         const responseData: any = await getResponse.json();
-        expect(responseData.result.hosts).toEqual([
-          testDomain,
-          `*.${testDomain}`,
-        ]);
-        expect(responseData.result.validity_days).toEqual(30);
-        expect(responseData.result.cloudflare_branding).toEqual(true);
+        expect(responseData.result.hosts).toEqual(
+          expect.arrayContaining([
+            testDomain,
+            `*.${testDomain}`,
+            expect.stringContaining("sni.cloudflaressl.com"),
+          ]),
+        );
+        expect(responseData.result.validity_days).toEqual(90);
       } finally {
         await destroy(scope);
 
@@ -280,7 +286,7 @@ describe
           {
             // zone: omitted - should auto-infer from hosts
             certificateAuthority: "lets_encrypt",
-            hosts: [`auto-infer-${testDomain}`, `www.auto-infer-${testDomain}`],
+            hosts: [`${testDomain}`, `www.${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -288,10 +294,10 @@ describe
 
         expect(certificatePack.id).toBeTruthy();
         expect(certificatePack.zoneId).toEqual(zone.id);
-        expect(certificatePack.zoneName).toEqual(`auto-infer-${testDomain}`);
+        expect(certificatePack.zoneName).toEqual(`${testDomain}`);
         expect(certificatePack.hosts).toEqual([
-          `auto-infer-${testDomain}`,
-          `www.auto-infer-${testDomain}`,
+          `${testDomain}`,
+          `www.${testDomain}`,
         ]);
 
         // Verify certificate pack was created in the correct zone
@@ -335,7 +341,7 @@ describe
           {
             zone: zone,
             certificateAuthority: "lets_encrypt",
-            hosts: [`adopt-${testDomain}`, `www.adopt-${testDomain}`],
+            hosts: [`${testDomain}`, `www.${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -349,7 +355,7 @@ describe
           {
             zone: zone,
             certificateAuthority: "lets_encrypt",
-            hosts: [`adopt-${testDomain}`, `www.adopt-${testDomain}`],
+            hosts: [`${testDomain}`, `www.${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -388,8 +394,8 @@ describe
 
       try {
         // Create a test zone
-        zone = await Zone(`wildcard-${testDomain}`, {
-          name: `wildcard-${testDomain}`,
+        zone = await Zone(`${testDomain}`, {
+          name: `${testDomain}`,
           type: "full",
           jumpStart: false,
           delete: false,
@@ -401,7 +407,7 @@ describe
           {
             // zone: omitted - should auto-infer from wildcard host
             certificateAuthority: "lets_encrypt",
-            hosts: [`*.wildcard-${testDomain}`, `wildcard-${testDomain}`],
+            hosts: [`*.${testDomain}`, `${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -409,10 +415,10 @@ describe
 
         expect(certificatePack.id).toBeTruthy();
         expect(certificatePack.zoneId).toEqual(zone.id);
-        expect(certificatePack.zoneName).toEqual(`wildcard-${testDomain}`);
+        expect(certificatePack.zoneName).toEqual(`${testDomain}`);
         expect(certificatePack.hosts).toEqual([
-          `*.wildcard-${testDomain}`,
-          `wildcard-${testDomain}`,
+          `*.${testDomain}`,
+          `${testDomain}`,
         ]);
       } finally {
         await destroy(scope);
