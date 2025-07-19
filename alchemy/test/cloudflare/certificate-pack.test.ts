@@ -286,7 +286,7 @@ describe
           {
             // zone: omitted - should auto-infer from hosts
             certificateAuthority: "lets_encrypt",
-            hosts: [`${testDomain}`, `www.${testDomain}`],
+            hosts: [testDomain, `www.${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -294,9 +294,9 @@ describe
 
         expect(certificatePack.id).toBeTruthy();
         expect(certificatePack.zoneId).toEqual(zone.id);
-        expect(certificatePack.zoneName).toEqual(`${testDomain}`);
+        expect(certificatePack.zoneName).toEqual(testDomain);
         expect(certificatePack.hosts).toEqual([
-          `${testDomain}`,
+          testDomain,
           `www.${testDomain}`,
         ]);
 
@@ -328,8 +328,8 @@ describe
 
       try {
         // Create a test zone
-        zone = await Zone(`adopt-${testDomain}`, {
-          name: `adopt-${testDomain}`,
+        zone = await Zone(testDomain, {
+          name: testDomain,
           type: "full",
           jumpStart: false,
           delete: false,
@@ -341,7 +341,7 @@ describe
           {
             zone: zone,
             certificateAuthority: "lets_encrypt",
-            hosts: [`${testDomain}`, `www.${testDomain}`],
+            hosts: [testDomain, `www.${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -355,7 +355,7 @@ describe
           {
             zone: zone,
             certificateAuthority: "lets_encrypt",
-            hosts: [`${testDomain}`, `www.${testDomain}`],
+            hosts: [testDomain, `www.${testDomain}`],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -394,8 +394,8 @@ describe
 
       try {
         // Create a test zone
-        zone = await Zone(`${testDomain}`, {
-          name: `${testDomain}`,
+        zone = await Zone(testDomain, {
+          name: testDomain,
           type: "full",
           jumpStart: false,
           delete: false,
@@ -407,7 +407,7 @@ describe
           {
             // zone: omitted - should auto-infer from wildcard host
             certificateAuthority: "lets_encrypt",
-            hosts: [`*.${testDomain}`, `${testDomain}`],
+            hosts: [`*.${testDomain}`, testDomain],
             validationMethod: "txt",
             validityDays: 90,
           },
@@ -415,11 +415,8 @@ describe
 
         expect(certificatePack.id).toBeTruthy();
         expect(certificatePack.zoneId).toEqual(zone.id);
-        expect(certificatePack.zoneName).toEqual(`${testDomain}`);
-        expect(certificatePack.hosts).toEqual([
-          `*.${testDomain}`,
-          `${testDomain}`,
-        ]);
+        expect(certificatePack.zoneName).toEqual(testDomain);
+        expect(certificatePack.hosts).toEqual([testDomain, `*.${testDomain}`]);
       } finally {
         await destroy(scope);
 

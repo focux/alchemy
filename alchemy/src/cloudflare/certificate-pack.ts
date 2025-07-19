@@ -299,7 +299,12 @@ export const CertificatePack = Resource(
           `/zones/${zoneId}/ssl/certificate_packs/${this.output.id}`,
         );
 
-        if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        if (
+          !deleteResponse.ok &&
+          deleteResponse.status !== 404 &&
+          //* if certificate is mid deletion cloudflare errors with 400
+          deleteResponse.status !== 400
+        ) {
           await handleApiError(
             deleteResponse,
             "delete",
@@ -532,6 +537,7 @@ async function findZoneForHostname(
   let longestMatch = 0;
 
   for (const zone of zonesData.result) {
+    console.log(zone, cleanHostname);
     if (
       cleanHostname === zone.name ||
       cleanHostname.endsWith(`.${zone.name}`)
@@ -566,7 +572,9 @@ async function findMatchingCertificatePack(
   zoneId: string,
   props: CertificatePackProps,
 ): Promise<CloudflareCertificatePack | null> {
-  const response = await api.get(`/zones/${zoneId}/ssl/certificate_packs`);
+  const response = await api.get(
+    `/zones/${zoneId}/ssl/certificate_packs?status=all`,
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to list certificate packs: ${response.statusText}`);
@@ -594,17 +602,14 @@ async function findMatchingCertificatePack(
       const packHosts = new Set(pack.hosts);
       const allHostsCovered = props.hosts.every((host) => packHosts.has(host));
 
-      // If Cloudflare branding is enabled, ensure that the cert pack is cloudflare branded`
-      if (
-        props.cloudflareBranding &&
-        !Array.from(packHosts).some((host) =>
-          host.endsWith("sni.cloudflaressl.com"),
-        )
-      ) {
-        continue;
-      }
-
       if (allHostsCovered) {
+        // If Cloudflare branding is enabled, ensure that the cert pack is cloudflare branded`
+        if (
+          props.cloudflareBranding &&
+          !pack.hosts.some((host) => host.endsWith("sni.cloudflaressl.com"))
+        ) {
+          continue;
+        }
         logger.log(
           `Found existing certificate pack ${pack.id} that covers all requested hosts`,
         );
