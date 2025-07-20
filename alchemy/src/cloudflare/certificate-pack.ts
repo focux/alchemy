@@ -537,7 +537,6 @@ async function findZoneForHostname(
   let longestMatch = 0;
 
   for (const zone of zonesData.result) {
-    console.log(zone, cleanHostname);
     if (
       cleanHostname === zone.name ||
       cleanHostname.endsWith(`.${zone.name}`)

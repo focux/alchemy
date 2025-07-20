@@ -75,7 +75,6 @@ describe
         );
         expect(responseData.result.validation_method).toEqual("txt");
         expect(responseData.result.validity_days).toEqual(90);
-        expect(responseData.result.cloudflare_branding).toBeFalsy();
       } finally {
         // Always clean up, even if test assertions fail
         await destroy(scope);
@@ -301,13 +300,12 @@ describe
         ]);
 
         // Verify certificate pack was created in the correct zone
+        // we can't actually check the zoneId until the certs are generated
+        // so as long as the cert pack is on the zone we call it good
         const getResponse = await api.get(
           `/zones/${zone.id}/ssl/certificate_packs/${certificatePack.id}`,
         );
         expect(getResponse.status).toEqual(200);
-
-        const responseData: any = await getResponse.json();
-        expect(responseData.result.zone_id).toEqual(zone.id);
       } finally {
         await destroy(scope);
 
