@@ -1,8 +1,9 @@
-import { zod as z } from "trpc-cli";
+import z from "zod";
 import {
   entrypoint,
   execAlchemy,
   execArgs,
+  force,
   watch,
 } from "../services/execute-alchemy.ts";
 import { t } from "../trpc.ts";
@@ -14,13 +15,11 @@ export const deploy = t.procedure
   .input(
     z.tuple([
       entrypoint,
-      z
-        .object({
-          ...execArgs,
-          watch,
-        })
-        .optional()
-        .default({}),
+      z.object({
+        ...execArgs,
+        force,
+        watch,
+      }),
     ]),
   )
   .mutation(async ({ input }) => execAlchemy(...input));

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import util from "node:util";
 import type { Phase } from "./alchemy.ts";
-import { destroy, destroyAll } from "./destroy.ts";
+import { destroy, destroyAll, DestroyStrategy } from "./destroy.ts";
 import {
   ResourceFQN,
   ResourceID,
@@ -38,7 +38,30 @@ export interface ScopeOptions {
   stateStore?: StateStoreType;
   quiet?: boolean;
   phase?: Phase;
-  dev?: "prefer-local" | "prefer-remote";
+  /**
+   * Determines if resources should be simulated locally (where possible)
+   *
+   * @default - `true` if ran with `alchemy dev` or `bun ./alchemy.run.ts --dev`
+   */
+  local?: boolean;
+  /**
+   * Determines if local changes to resources should be reactively pushed to the local or remote environment.
+   *
+   * @default - `true` if ran with `alchemy dev`, `alchemy watch`, `bun --watch ./alchemy.run.ts`
+   */
+  watch?: boolean;
+  /**
+   * Apply updates to resources even if there are no changes.
+   *
+   * @default false
+   */
+  force?: boolean;
+  /**
+   * The strategy to use when destroying resources.
+   *
+   * @default "sequential"
+   */
+  destroyStrategy?: DestroyStrategy;
   telemetryClient?: ITelemetryClient;
   logger?: LoggerApi;
 }
@@ -107,12 +130,16 @@ export class Scope {
   public readonly stateStore: StateStoreType;
   public readonly quiet: boolean;
   public readonly phase: Phase;
-  public readonly dev?: "prefer-local" | "prefer-remote";
+  public readonly local: boolean;
+  public readonly watch: boolean;
+  public readonly force: boolean;
+  public readonly destroyStrategy: DestroyStrategy;
   public readonly logger: LoggerApi;
   public readonly telemetryClient: ITelemetryClient;
   public readonly dataMutex: AsyncMutex;
 
   private isErrored = false;
+  private isSkipped = false;
   private finalized = false;
   private startedAt = performance.now();
 
@@ -162,9 +189,12 @@ export class Scope {
           options.logger,
         );
 
-    this.dev = options.dev ?? this.parent?.dev;
-
-    if (this.dev) {
+    this.local = options.local ?? this.parent?.local ?? false;
+    this.watch = options.watch ?? this.parent?.watch ?? false;
+    this.force = options.force ?? this.parent?.force ?? false;
+    this.destroyStrategy =
+      options.destroyStrategy ?? this.parent?.destroyStrategy ?? "sequential";
+    if (this.local) {
       this.logger.warnOnce(
         "Development mode is in beta. Please report any issues to https://github.com/sam-goodwin/alchemy/issues.",
       );
@@ -179,6 +209,17 @@ export class Scope {
     this.telemetryClient =
       options.telemetryClient ?? this.parent?.telemetryClient!;
     this.dataMutex = new AsyncMutex();
+  }
+
+  /**
+   * @internal
+   */
+  public clear() {
+    for (const child of this.children.values()) {
+      child.clear();
+    }
+    this.resources.clear();
+    this.children.clear();
   }
 
   public get root(): Scope {
@@ -224,6 +265,10 @@ export class Scope {
   public fail() {
     this.logger.error("Scope failed", this.chain.join("/"));
     this.isErrored = true;
+  }
+
+  public skip() {
+    this.isSkipped = true;
   }
 
   public async init() {
@@ -285,6 +330,7 @@ export class Scope {
                 [ResourceKind]: "alchemy::Scope",
                 [ResourceScope]: this,
                 [ResourceSeq]: this.seq(),
+                [DestroyStrategy]: this.destroyStrategy,
               },
               props: {},
             }
@@ -365,7 +411,7 @@ export class Scope {
     this.finalized = true;
     // trigger and await all deferred promises
     await Promise.all(this.deferred.map((fn) => fn()));
-    if (!this.isErrored) {
+    if (!this.isErrored && !this.isSkipped) {
       // TODO: need to detect if it is in error
       const resourceIds = await this.state.list();
       const aliveIds = new Set(this.resources.keys());
@@ -396,14 +442,14 @@ export class Scope {
       );
       await destroyAll(orphans, {
         quiet: this.quiet,
-        strategy: "sequential",
+        strategy: this.destroyStrategy,
         force: shouldForce,
       });
       this.rootTelemetryClient?.record({
         event: "app.success",
         elapsed: performance.now() - this.startedAt,
       });
-    } else {
+    } else if (this.isErrored) {
       this.logger.warn("Scope is in error, skipping finalize");
       this.rootTelemetryClient?.record({
         event: "app.error",
@@ -415,6 +461,10 @@ export class Scope {
     await this.rootTelemetryClient?.finalize()?.catch((error) => {
       this.logger.warn("Telemetry finalization failed:", error);
     });
+
+    if (!this.parent && process.env.ALCHEMY_TEST_KILL_ON_FINALIZE) {
+      process.exit(0);
+    }
   }
 
   public async destroyPendingDeletions() {

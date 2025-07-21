@@ -2,7 +2,7 @@ import { log } from "@clack/prompts";
 import { execa } from "execa";
 import { resolve } from "node:path";
 import pc from "picocolors";
-import { zod as z } from "trpc-cli";
+import z from "zod";
 import { detectRuntime } from "../../src/util/detect-node-runtime.ts";
 import { detectPackageManager } from "../../src/util/detect-package-manager.ts";
 import { exists } from "../../src/util/exists.ts";
@@ -19,6 +19,12 @@ export const watch = z
   .optional()
   .default(false)
   .describe("Watch for changes to infrastructure and redeploy automatically");
+
+export const force = z
+  .boolean()
+  .optional()
+  .default(false)
+  .describe("Apply updates to resources even if there are no changes");
 
 export const execArgs = {
   cwd: z
@@ -44,6 +50,7 @@ export async function execAlchemy(
   {
     cwd = process.cwd(),
     quiet,
+    force,
     stage,
     destroy,
     watch,
@@ -53,6 +60,7 @@ export async function execAlchemy(
   }: {
     cwd?: string;
     quiet?: boolean;
+    force?: boolean;
     stage?: string;
     destroy?: boolean;
     watch?: boolean;
@@ -65,6 +73,7 @@ export async function execAlchemy(
   const execArgs: string[] = [];
   if (quiet) args.push("--quiet");
   if (read) args.push("--read");
+  if (force) args.push("--force");
   if (stage) args.push(`--stage ${stage}`);
   if (destroy) args.push("--destroy");
   if (watch) execArgs.push("--watch");

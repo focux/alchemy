@@ -1,6 +1,6 @@
 {
   "name": "alchemy",
-  "version": "0.45.6",
+  "version": "0.49.1",
   "license": "Apache-2.0",
   "author": "Sam Goodwin <sam@alchemy.run>",
   "homepage": "https://alchemy.run",
@@ -15,7 +15,7 @@
     "alchemy": "bin/alchemy.mjs"
   },
   "scripts": {
-    "build:cli": "bun ./scripts/bundle-cli.ts",
+    "build:cli": "bun ./scripts/build-cli.ts",
     "build:workers": "bun ./scripts/build-workers.ts",
     "build": "rm -rf ./*.tsbuildinfo && rm -rf ./lib && tsc -b && bun run build:cli && bun run build:workers",
     "drizzle:generate": "bun run scripts/drizzle-generate.ts",
@@ -23,7 +23,6 @@
     "postbuild": "cpx 'src/**/*/types.d.ts' lib && cpx 'src/**/*.txt' lib",
     "publish:npm": "cp ../README.md . && bun run build && bun run build:cli && npm publish && rm README.md"
   },
-
   "files": [
     "bin",
     "drizzle/default",
@@ -149,13 +148,14 @@
     "jszip": "^3.0.0",
     "kleur": "^4.1.5",
     "libsodium-wrappers": "^0.7.15",
+    "miniflare": "^4.20250712.0",
     "neverthrow": "^8.2.0",
     "open": "^10.1.2",
-    "miniflare": "^4.20250617.4",
     "pathe": "^2.0.3",
     "turndown": "^7.0.0",
     "unenv": "2.0.0-rc.15",
     "ws": "^8.18.3",
+    "xdg-app-paths": "^8.3.0",
     "yaml": "^2.0.0"
   },
   "peerDependencies": {
@@ -181,7 +181,7 @@
     "hono": "^4.0.0",
     "prettier": "^3.0.0",
     "stripe": "^17.0.0",
-    "zod": "^3.0.0"
+    "zod": "^3.0.0 || ^4.0.0"
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "^1.1.6",
@@ -213,14 +213,15 @@
     "fs-extra": "^11.3.0",
     "globby": "^14.1.0",
     "libsodium-wrappers": "^0.7.15",
+    "listr2": "^8.0.0",
     "nitro-cloudflare-dev": "^0.2.2",
     "openpgp": "^6.1.0",
     "picocolors": "^1.1.1",
     "prettier": "^3.5.3",
-    "trpc-cli": "^0.9.2",
+    "trpc-cli": "^0.10.0",
     "turndown": "^7.2.0",
-    "typedoc": "^0.28.1",
     "typedoc-plugin-markdown": "^4.6.0",
+    "typedoc": "^0.28.1",
     "typescript": "^5.8.3",
     "vite": "^6.0.7",
     "vitepress": "^1.6.3",
