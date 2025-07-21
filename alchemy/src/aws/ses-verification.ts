@@ -6,15 +6,15 @@ import {
   PutEmailIdentityDkimAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
+import type { CloudflareApiOptions } from "../cloudflare/api.ts";
+import { createCloudflareApi } from "../cloudflare/api.ts";
+import { DnsRecords } from "../cloudflare/dns-records.ts";
+import { getZoneByDomain } from "../cloudflare/zone.ts";
 import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import { ignore } from "../util/ignore.ts";
 import { logger } from "../util/logger.ts";
 import { retry } from "./retry.ts";
-import { DnsRecords } from "../cloudflare/dns-records.ts";
-import { getZoneByDomain } from "../cloudflare/zone.ts";
-import { createCloudflareApi } from "../cloudflare/api.ts";
-import type { CloudflareApiOptions } from "../cloudflare/api.ts";
 
 /**
  * Properties for configuring AWS SES verification with Cloudflare DNS

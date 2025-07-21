@@ -187,17 +187,6 @@ async function _apply<Out extends Resource>(
           );
         }
 
-        if (force) {
-          await destroy(resource, {
-            quiet: scope.quiet,
-            strategy: "sequential",
-            replace: {
-              props: state.oldProps,
-              output: resource,
-            },
-          });
-        }
-
         isReplaced = true;
         throw new ReplacedSignal(force);
       },
