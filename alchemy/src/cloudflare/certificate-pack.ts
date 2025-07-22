@@ -298,12 +298,17 @@ export const CertificatePack = Resource(
         const deleteResponse = await api.delete(
           `/zones/${zoneId}/ssl/certificate_packs/${this.output.id}`,
         );
+        const deleteResponseJson = (await deleteResponse.json()) as {
+          errors: Array<{ code: number }>;
+        };
+        const isCurrentlyDeleting =
+          deleteResponse.status === 400 &&
+          deleteResponseJson.errors[0].code === 1406;
 
         if (
           !deleteResponse.ok &&
           deleteResponse.status !== 404 &&
-          //* if certificate is mid deletion cloudflare errors with 400
-          deleteResponse.status !== 400
+          !isCurrentlyDeleting
         ) {
           await handleApiError(
             deleteResponse,
