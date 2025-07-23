@@ -98,7 +98,6 @@ function buildOptions({
     absWorkingDir: cwd,
     format: props.format,
     target: "esnext",
-    platform: "node",
     metafile: true,
     write: true,
     bundle: true,
