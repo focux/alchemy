@@ -16,7 +16,7 @@ export interface TelemetryClientOptions {
 }
 
 export interface ITelemetryClient {
-  ready: Promise<void>;
+  ready: Promise<unknown>;
   record(event: Telemetry.EventInput): void;
   finalize(): Promise<void>;
 }
@@ -30,27 +30,21 @@ export class NoopTelemetryClient implements ITelemetryClient {
 }
 
 export class TelemetryClient implements ITelemetryClient {
-  ready: Promise<void>;
-
+  private context: Promise<Telemetry.Context>;
   private events: Telemetry.Event[] = [];
-  private context?: Telemetry.Context;
 
   constructor(readonly options: TelemetryClientOptions) {
-    this.ready = this.init();
-  }
-
-  private async init() {
-    const now = Date.now();
-    this.context = await context({
+    this.context = context({
       sessionId: this.options.sessionId,
       phase: this.options.phase,
     });
-    this.record(
-      {
-        event: "app.start",
-      },
-      now,
-    );
+    this.record({
+      event: "app.start",
+    });
+  }
+
+  get ready() {
+    return this.context;
   }
 
   record(event: Telemetry.EventInput, timestamp = Date.now()) {
@@ -72,9 +66,8 @@ export class TelemetryClient implements ITelemetryClient {
       return {
         ...error, // include additional properties from error object
         name: error.name,
-        message: error.message,
-        // TODO: maybe redact more of the stack trace?
-        stack: error.stack?.replaceAll(os.homedir(), "~"), // redact home directory
+        message: error.message?.replaceAll(os.homedir(), "~"), // redact home directory
+        stack: error.stack?.replaceAll(os.homedir(), "~"),
       };
     }
     return error;
@@ -89,10 +82,10 @@ export class TelemetryClient implements ITelemetryClient {
   }
 
   private async send(events: Telemetry.Event[]) {
-    if (events.length === 0 || this.context) {
+    if (events.length === 0) {
       return;
     }
-    const { userId, ...data } = this.context!;
+    const { userId, ...context } = await this.context;
     const response = await fetch(`${POSTHOG_CLIENT_API_HOST}/batch`, {
       method: "POST",
       headers: {
@@ -101,18 +94,15 @@ export class TelemetryClient implements ITelemetryClient {
       body: JSON.stringify({
         api_key: POSTHOG_PROJECT_ID,
         historical_migration: false,
-        batch: events.map((e) => {
-          const { event, ...eventData } = e;
-          return {
-            event: event,
-            properties: {
-              distinct_id: userId,
-              ...data,
-              ...eventData,
-            },
-            timestamp: new Date(e.timestamp).toISOString(),
-          };
-        }),
+        batch: events.map(({ event, timestamp, ...properties }) => ({
+          event,
+          properties: {
+            distinct_id: userId,
+            ...context,
+            ...properties,
+          },
+          timestamp: new Date(timestamp).toISOString(),
+        })),
       }),
     });
     if (!response.ok) {
