@@ -49,10 +49,6 @@ class MiniflareServer {
     return server;
   }
 
-  async close() {
-    await this.writer.close();
-  }
-
   private async set(worker: MiniflareWorkerOptions) {
     this.workers.set(
       worker.name,
@@ -66,11 +62,6 @@ class MiniflareServer {
         this.miniflare.setOptions(await this.miniflareOptions()),
       );
     } else {
-      // Miniflare intercepts SIGINT and exits with 130, which is not a failure.
-      // No one likes to see a non-zero exit code when they Ctrl+C, so here's our workaround.
-      process.on("exit", (code) => {
-        process.exit(code === 130 ? 0 : code);
-      });
       this.miniflare = new miniflare.Miniflare(await this.miniflareOptions());
       await withErrorRewrite(this.miniflare.ready);
     }
@@ -88,7 +79,7 @@ class MiniflareServer {
     return newProxy;
   }
 
-  private async dispose() {
+  async dispose() {
     await Promise.all([
       this.miniflare?.dispose(),
       ...Array.from(this.workerProxies.values()).map((server) =>
