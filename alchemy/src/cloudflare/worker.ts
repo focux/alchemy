@@ -37,8 +37,6 @@ import {
   isDurableObjectNamespace,
 } from "./durable-object-namespace.ts";
 import { type EventSource, isQueueEventSource } from "./event-source.ts";
-import type { MiniflareWorkerOptions } from "./miniflare/miniflare-worker-options.ts";
-import { miniflareServer } from "./miniflare/miniflare.ts";
 import {
   QueueConsumer,
   deleteQueueConsumer,
@@ -47,11 +45,7 @@ import {
 import { isQueue } from "./queue.ts";
 import { Route } from "./route.ts";
 import { uploadAssets } from "./worker-assets.ts";
-import {
-  WorkerBundle,
-  type WorkerBundleSource,
-  normalizeWorkerBundle,
-} from "./worker-bundle.ts";
+import { WorkerBundle, normalizeWorkerBundle } from "./worker-bundle.ts";
 import {
   type WorkerScriptMetadata,
   bumpMigrationTagVersion,
@@ -65,6 +59,7 @@ import { Workflow, isWorkflow, upsertWorkflow } from "./workflow.ts";
 // This import is here to avoid errors when destroying the `Bundle` resource.
 import "../esbuild/bundle.ts";
 import { exists } from "../util/exists.ts";
+import { getMiniflareSingleton } from "./miniflare/index.ts";
 
 /**
  * Configuration options for static assets
@@ -785,16 +780,25 @@ const _Worker = Resource(
         url = result.url;
       } else {
         const result = await this.spawn(async () => {
-          return await createMiniflare({
-            id,
-            workerName,
+          const controller = await getMiniflareSingleton();
+          const url = await controller.add({
+            name: workerName,
             compatibilityDate,
             compatibilityFlags,
             bindings: props.bindings,
+            eventSources: props.eventSources,
+            assets: props.assets,
             bundle: bundleSourceResult.value,
             port: props.dev?.port,
-            assets: props.assets,
           });
+          logger.task(this.fqn, {
+            message: `ready at ${url}`,
+            status: "success",
+            resource: id,
+            prefix: "miniflare",
+            prefixColor: "greenBright",
+          });
+          return { url, cleanup: () => controller.dispose() };
         });
         url = result.url;
       }
@@ -982,7 +986,6 @@ const _Worker = Resource(
           putWorkerResult: await promise.value,
           cleanup: async () => {
             controller.abort();
-            await miniflareServer.dispose();
           },
         };
       });
@@ -1331,52 +1334,6 @@ async function provisionSubdomain(
   if (props.forceDelete) {
     await disableWorkerSubdomain(api, props.scriptName);
   }
-}
-
-async function createMiniflare(props: {
-  id: string;
-  workerName: string;
-  compatibilityDate: string;
-  compatibilityFlags: string[];
-  bindings: Bindings | undefined;
-  port: number | undefined;
-  bundle: WorkerBundleSource;
-  assets: AssetsConfig | undefined;
-}) {
-  const sharedOptions: Omit<MiniflareWorkerOptions, "bundle"> = {
-    name: props.workerName,
-    compatibilityDate: props.compatibilityDate,
-    compatibilityFlags: props.compatibilityFlags,
-    bindings: props.bindings,
-    port: props.port,
-    assets: props.assets,
-  };
-
-  const controller = new AbortController();
-  const startPromise = new DeferredPromise<string>();
-  const run = async () => {
-    for await (const bundle of props.bundle.watch(controller.signal)) {
-      const server = await miniflareServer.push({
-        ...sharedOptions,
-        bundle,
-      });
-      if (startPromise.status === "pending") {
-        startPromise.resolve(server.url);
-      }
-      logger.task("", {
-        message: `ready at ${server.url}`,
-        status: "success",
-        resource: props.id,
-        prefix: "miniflare",
-        prefixColor: "greenBright",
-      });
-    }
-  };
-  void run();
-  return {
-    url: await startPromise.value,
-    cleanup: () => controller.abort(),
-  };
 }
 
 async function createDevCommand(props: {
