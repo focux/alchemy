@@ -1,5 +1,5 @@
 {
-  "name": "cloudflare-react-router-samgoodwin-website",
+  "name": "cloudflare-react-router-johnroyal-website",
   "main": "workers/app.ts",
   "compatibility_date": "2025-07-26",
   "assets": { "directory": "build/client", "binding": "ASSETS" }

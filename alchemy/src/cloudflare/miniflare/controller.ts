@@ -1,20 +1,25 @@
-import * as miniflare from "miniflare";
+import type * as miniflare from "miniflare";
 import assert from "node:assert";
+import { once } from "node:events";
 import path from "node:path";
-import { findOpenPort } from "../../util/find-open-port.ts";
+import { DeferredPromise } from "../../util/deferred-promise.ts";
+import { spawnDetached } from "../../util/detached-process.ts";
 import type { HTTPServer } from "../../util/http.ts";
 import { AsyncMutex } from "../../util/mutex.ts";
 import {
   buildWorkerOptions,
   type MiniflareWorkerInput,
 } from "./build-worker-options.ts";
-import { MiniflareWorkerProxy } from "./miniflare-worker-proxy.ts";
+import type {
+  IPCError,
+  IPCRequest,
+  IPCSuccess,
+  MiniflareWorker,
+} from "./ipc-target.ts";
 
 export class MiniflareController {
-  abort = new AbortController();
-  miniflare: miniflare.Miniflare | undefined;
-  options = new Map<string, miniflare.WorkerOptions>();
-  localProxies = new Map<string, MiniflareWorkerProxy>();
+  ipc: ReturnType<typeof createIPC> | undefined;
+  abortController = new AbortController();
   remoteProxies = new Map<string, HTTPServer>();
   mutex = new AsyncMutex();
 
@@ -23,19 +28,14 @@ export class MiniflareController {
     if (remoteProxy) {
       this.remoteProxies.set(input.name, remoteProxy);
     }
-    const watcher = watch(this.abort.signal);
+    const watcher = watch(this.abortController.signal);
     const first = await watcher.next();
     assert(first.value, "First value is undefined");
-    this.options.set(input.name, first.value);
-    const miniflare = await this.update();
-    const proxy = new MiniflareWorkerProxy({
-      name: input.name,
-      port: input.port ?? (await findOpenPort()),
-      miniflare,
-    });
-    this.localProxies.set(input.name, proxy);
     void this.watch(input.name, watcher);
-    return proxy.url;
+    return await this.update({
+      name: input.name,
+      options: first.value,
+    });
   }
 
   private async watch(
@@ -43,62 +43,82 @@ export class MiniflareController {
     watcher: AsyncGenerator<miniflare.WorkerOptions>,
   ) {
     for await (const options of watcher) {
-      this.options.set(name, options);
-      await this.update();
+      await this.update({ name, options });
     }
   }
 
-  private async update() {
-    return await this.mutex.lock(async () => {
-      const options: miniflare.MiniflareOptions = {
-        workers: Array.from(this.options.values()),
-        defaultPersistRoot: path.join(process.cwd(), ".alchemy/miniflare"),
-        unsafeDevRegistryPath: miniflare.getDefaultDevRegistryPath(),
-        analyticsEngineDatasetsPersist: true,
-        cachePersist: true,
-        d1Persist: true,
-        durableObjectsPersist: true,
-        kvPersist: true,
-        r2Persist: true,
-        secretsStorePersist: true,
-        workflowsPersist: true,
-        log: process.env.DEBUG
-          ? new miniflare.Log(miniflare.LogLevel.DEBUG)
-          : undefined,
-      };
-      return await this.setMiniflareOptions(options);
-    });
-  }
-
-  private async setMiniflareOptions(options: miniflare.MiniflareOptions) {
-    try {
-      if (this.miniflare) {
-        await this.miniflare.setOptions(options);
-      } else {
-        this.miniflare = new miniflare.Miniflare(options);
-        await this.miniflare.ready;
-      }
-      return this.miniflare;
-    } catch (error) {
-      if (
-        error instanceof miniflare.MiniflareCoreError &&
-        error.code === "ERR_MODULE_STRING_SCRIPT"
-      ) {
-        throw new Error(
-          'Miniflare detected an external dependency that could not be resolved. This typically occurs when the "nodejs_compat" or "nodejs_als" compatibility flag is not enabled.',
-        );
-      } else {
-        throw error;
-      }
-    }
+  private async update(worker: MiniflareWorker) {
+    this.ipc ??= createIPC();
+    const ipc = await this.ipc;
+    return await ipc.update(worker);
   }
 
   async dispose() {
-    this.abort.abort();
-    await Promise.all([
-      this.miniflare?.dispose(),
-      ...this.localProxies.values().map((proxy) => proxy.close()),
+    this.abortController.abort();
+    await Promise.allSettled([
+      this.ipc ? this.ipc.then((ipc) => ipc.dispose()) : undefined,
       ...this.remoteProxies.values().map((proxy) => proxy.close()),
     ]);
   }
+}
+
+async function createIPC() {
+  let id = 0;
+  let disposed = false;
+  // TODO: decouple from Bun
+  const child = await spawnDetached(
+    "miniflare-controller",
+    "bun",
+    ["run", path.join(__dirname, "ipc-target.ts")],
+    {
+      stdio: ["inherit", "inherit", "inherit", "ipc"],
+      cwd: process.cwd(),
+    },
+  );
+  await once(child, "spawn");
+
+  const responseQueue = new Map<number, DeferredPromise<any>>();
+  child.on("message", (message: IPCSuccess<any> | IPCError) => {
+    const promise = responseQueue.get(message.id);
+    if (!promise) return;
+    console.log("message", message);
+    responseQueue.delete(message.id);
+    if (message.success) {
+      promise.resolve(message.payload);
+    } else {
+      const error = new Error(message.error.message);
+      error.name = message.error.name ?? "Error";
+      error.stack = message.error.stack;
+      promise.reject(error);
+    }
+  });
+
+  const send = <Type extends string, Payload, Response>(
+    type: Type,
+    payload: Payload,
+  ) => {
+    const promise = new DeferredPromise<Response>();
+    const request: IPCRequest<Type, Payload> = {
+      id: id++,
+      type,
+      payload,
+    };
+    responseQueue.set(request.id, promise);
+    child.send(request);
+    return promise.value;
+  };
+
+  return {
+    update: async (worker: MiniflareWorker) => {
+      return await send<"update", { worker: MiniflareWorker }, { url: string }>(
+        "update",
+        { worker },
+      );
+    },
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      await Promise.all([send("dispose", null), once(child, "close")]);
+    },
+  };
 }

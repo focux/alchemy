@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import path from "pathe";
@@ -57,6 +56,7 @@ import { Workflow, isWorkflow, upsertWorkflow } from "./workflow.ts";
 
 // Previous versions of `Worker` used the `Bundle` resource.
 // This import is here to avoid errors when destroying the `Bundle` resource.
+import { spawn } from "node:child_process";
 import "../esbuild/bundle.ts";
 import { exists } from "../util/exists.ts";
 import { getMiniflareSingleton } from "./miniflare/index.ts";
@@ -781,7 +781,7 @@ const _Worker = Resource(
       } else {
         const result = await this.spawn(async () => {
           const controller = await getMiniflareSingleton();
-          const url = await controller.add({
+          const { url } = await controller.add({
             name: workerName,
             compatibilityDate,
             compatibilityFlags,
@@ -798,7 +798,7 @@ const _Worker = Resource(
             prefix: "miniflare",
             prefixColor: "greenBright",
           });
-          return { url, cleanup: () => controller.dispose() };
+          return { url, cleanup: async () => await controller.dispose() };
         });
         url = result.url;
       }

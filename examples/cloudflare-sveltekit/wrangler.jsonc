@@ -1,7 +1,21 @@
 {
-  "name": "cloudflare-sveltekit-samgoodwin-website",
+  "name": "cloudflare-sveltekit-johnroyal-website",
   "main": ".svelte-kit/cloudflare/_worker.js",
   "compatibility_date": "2025-07-26",
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": ".svelte-kit/cloudflare", "binding": "ASSETS" },
+  "kv_namespaces": [
+    {
+      "binding": "AUTH_STORE",
+      "id": "6d225e69f8d645e8a5e00a2081ce648c",
+      "preview_id": "6d225e69f8d645e8a5e00a2081ce648c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "cloudflare-sveltekit-johnroyal-storage",
+      "preview_bucket_name": "cloudflare-sveltekit-johnroyal-storage"
+    }
+  ]
 }
