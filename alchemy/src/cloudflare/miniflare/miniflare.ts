@@ -2,10 +2,6 @@ import * as miniflare from "miniflare";
 import path from "node:path";
 import { findOpenPort } from "../../util/find-open-port.ts";
 import {
-  promiseWithResolvers,
-  type PromiseWithResolvers,
-} from "../../util/promise-with-resolvers.ts";
-import {
   buildMiniflareWorkerOptions,
   buildRemoteBindings,
   type MiniflareWorkerOptions,
@@ -22,31 +18,8 @@ class MiniflareServer {
   workerProxies = new Map<string, MiniflareWorkerProxy>();
   remoteBindingProxies = new Map<string, RemoteBindingProxy>();
 
-  stream = new WritableStream<{
-    worker: MiniflareWorkerOptions;
-    promise: PromiseWithResolvers<{ url: string }>;
-  }>({
-    write: async ({ worker, promise }) => {
-      try {
-        const server = await this.set(worker);
-        promise.resolve(server);
-      } catch (error) {
-        promise.reject(error);
-      }
-    },
-    close: async () => {
-      await this.dispose();
-    },
-  });
-  writer = this.stream.getWriter();
-
   async push(worker: MiniflareWorkerOptions) {
-    const promise = promiseWithResolvers<{ url: string }>();
-    const [, server] = await Promise.all([
-      this.writer.write({ worker, promise }),
-      promise.promise,
-    ]);
-    return server;
+    return await this.set(worker);
   }
 
   private async set(worker: MiniflareWorkerOptions) {
@@ -92,6 +65,7 @@ class MiniflareServer {
     this.miniflare = undefined;
     this.workers.clear();
     this.workerProxies.clear();
+    this.remoteBindingProxies.clear();
   }
 
   private async maybeCreateRemoteProxy(

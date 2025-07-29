@@ -24,67 +24,57 @@ export type MiniflareWorkerOptions = Pick<
   port?: number;
 };
 
-type BindingType = Exclude<Binding, string | Self>["type"];
-
-const REMOTE_ONLY_BINDING_TYPES = [
+const REMOTE_BINDING_TYPES = [
   "ai",
   "ai_gateway",
   "browser",
   "dispatch_namespace",
   "vectorize",
-] satisfies BindingType[];
-const REMOTE_OPTIONAL_BINDING_TYPES = [
   "d1",
-  // "durable_object_namespace", This is supported in Miniflare but needs some wrangling to make it work with a remote proxy.
   "images",
   "kv_namespace",
   "r2_bucket",
   "queue",
   "service",
-  // "workflow", same thing
-] satisfies BindingType[];
+] as const;
+const ALWAYS_REMOTE_BINDING_TYPES = [
+  "ai",
+  "ai_gateway",
+  "browser",
+  "dispatch_namespace",
+  "vectorize",
+];
 
-type RemoteBindingType =
-  | (typeof REMOTE_ONLY_BINDING_TYPES)[number]
-  | (typeof REMOTE_OPTIONAL_BINDING_TYPES)[number];
-
-type RemoteBinding = Extract<Binding, { type: RemoteBindingType }>;
+type RemoteBinding = Extract<
+  Binding,
+  { type: (typeof REMOTE_BINDING_TYPES)[number] }
+>;
 
 export function buildRemoteBindings(
   input: Pick<MiniflareWorkerOptions, "bindings">,
 ) {
   const bindings: WorkerBindingSpec[] = [];
   for (const [name, binding] of Object.entries(input.bindings ?? {})) {
-    if (isRemoteOnlyBinding(binding)) {
-      bindings.push(buildRemoteBinding(name, binding));
-    } else if (isRemoteOptionalBinding(binding) && isRemoteEnabled(binding)) {
+    if (requiresRemoteProxy(binding) && shouldUseRemote(binding)) {
       bindings.push(buildRemoteBinding(name, binding));
     }
   }
   return bindings;
 }
 
-function isRemoteOptionalBinding(binding: Binding): binding is RemoteBinding {
+function requiresRemoteProxy(binding: Binding): binding is RemoteBinding {
   return (
     typeof binding !== "string" &&
     binding !== Self &&
     typeof binding === "object" &&
     "type" in binding &&
-    REMOTE_OPTIONAL_BINDING_TYPES.includes(binding.type as any)
+    REMOTE_BINDING_TYPES.includes(binding.type as any)
   );
 }
 
-function isRemoteOnlyBinding(binding: Binding): binding is RemoteBinding {
-  return (
-    typeof binding !== "string" &&
-    binding !== Self &&
-    typeof binding === "object" &&
-    "type" in binding &&
-    REMOTE_ONLY_BINDING_TYPES.includes(binding.type as any)
-  );
-}
+function shouldUseRemote(binding: RemoteBinding): boolean {
+  if (ALWAYS_REMOTE_BINDING_TYPES.includes(binding.type)) return true;
 
-function isRemoteEnabled(binding: RemoteBinding): boolean {
   return (
     "dev" in binding &&
     typeof binding.dev === "object" &&
@@ -97,114 +87,46 @@ function buildRemoteBinding(
   name: string,
   binding: RemoteBinding,
 ): WorkerBindingSpec & { raw?: true } {
+  const base = { name, raw: true } as const;
+
   switch (binding.type) {
-    case "ai": {
+    case "ai":
+    case "ai_gateway":
+      return { ...base, type: "ai" };
+    case "browser":
+      return { ...base, type: "browser" };
+    case "images":
+      return { ...base, type: "images" };
+    case "d1":
+      return { ...base, type: "d1", id: binding.id };
+    case "dispatch_namespace":
       return {
-        type: "ai",
-        name,
-        raw: true,
-      };
-    }
-    case "ai_gateway": {
-      return {
-        type: "ai",
-        name,
-        raw: true,
-      };
-    }
-    case "browser": {
-      return {
-        type: "browser",
-        name,
-        raw: true,
-      };
-    }
-    case "d1": {
-      return {
-        type: "d1",
-        name,
-        id: binding.id,
-        raw: true,
-      };
-    }
-    case "dispatch_namespace": {
-      return {
+        ...base,
         type: "dispatch_namespace",
-        name,
         namespace: binding.namespace,
-        raw: true,
       };
-    }
-    // case "durable_object_namespace": {
-    //   return {
-    //     type: "durable_object_namespace",
-    //     name,
-    //     class_name: binding.className,
-    //     script_name: binding.scriptName,
-    //     raw: true,
-    //   };
-    // }
-    case "images": {
+    case "kv_namespace":
       return {
-        type: "images",
-        name,
-        raw: true,
-      };
-    }
-    case "kv_namespace": {
-      return {
+        ...base,
         type: "kv_namespace",
-        name,
         namespace_id:
           "namespaceId" in binding ? binding.namespaceId : binding.id,
-        raw: true,
       };
-    }
-    case "queue": {
-      return {
-        type: "queue",
-        name,
-        queue_name: binding.name,
-        raw: true,
-      };
-    }
-    case "r2_bucket": {
-      return {
-        type: "r2_bucket",
-        name,
-        bucket_name: binding.name,
-        raw: true,
-      };
-    }
-    case "service": {
+    case "queue":
+      return { ...base, type: "queue", queue_name: binding.name };
+    case "r2_bucket":
+      return { ...base, type: "r2_bucket", bucket_name: binding.name };
+    case "service":
       return {
         type: "service",
         name,
         service: "service" in binding ? binding.service : binding.name,
         environment: "environment" in binding ? binding.environment : undefined,
       };
-    }
-    case "vectorize": {
-      return {
-        type: "vectorize",
-        name,
-        index_name: binding.name,
-        raw: true,
-      };
-    }
-    // case "workflow": {
-    //   return {
-    //     type: "workflow",
-    //     name,
-    //     workflow_name: binding.workflowName,
-    //     class_name: binding.className,
-    //     script_name: binding.scriptName,
-    //     raw: true,
-    //   };
-    // }
-    default: {
+    case "vectorize":
+      return { ...base, type: "vectorize", index_name: binding.name };
+    default:
       assertNever(binding);
-    }
   }
 }
 
@@ -512,7 +434,7 @@ export function buildMiniflareWorkerOptions({
             `Service bindings must have an id. Worker "${name}" is bound to service "${name}" but does not have an id.`,
           );
         }
-        if (isRemoteEnabled(binding)) {
+        if (shouldUseRemote(binding)) {
           (options.serviceBindings ??= {})[name] = {
             name: binding.name,
             remoteProxyConnectionString,
