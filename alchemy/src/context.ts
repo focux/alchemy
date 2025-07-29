@@ -68,6 +68,28 @@ export interface BaseContext<Out extends Resource> {
    */
   destroy(): never;
   /**
+   * Register a cleanup function that will be called when the scope is finalized.
+   * The provided function should spawn/create resources and return a cleanup function.
+   *
+   * @param fn - An async function that creates resources and returns a cleanup function
+   * @returns The result of the provided function
+   *
+   * @example
+   * const { process, cleanup } = await this.spawn(async () => {
+   *   const proc = spawn('my-command', ['arg1', 'arg2']);
+   *   return {
+   *     process: proc,
+   *     cleanup: async () => {
+   *       proc.kill();
+   *       await waitForExit(proc);
+   *     }
+   *   };
+   * });
+   */
+  spawn<T extends { cleanup: () => void | Promise<void> }>(
+    fn: () => Promise<T> | T,
+  ): Promise<T>;
+  /**
    * Create the Resource envelope (with Alchemy + User properties)
    */
   create(props: Omit<Out, keyof Resource>): Out;
@@ -152,6 +174,11 @@ export function context<
     quiet: scope.quiet,
     destroy: () => {
       throw new DestroyedSignal();
+    },
+    spawn: async <T extends { cleanup: () => Promise<void> }>(
+      fn: () => Promise<T> | T,
+    ) => {
+      return scope.root.spawn(fn);
     },
     create,
   }) as unknown as Context<Out>;

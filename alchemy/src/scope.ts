@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import util from "node:util";
+import { onExit } from "signal-exit";
 import type { Phase } from "./alchemy.ts";
 import { destroy, destroyAll, DestroyStrategy } from "./destroy.ts";
 import {
@@ -99,6 +100,8 @@ export class Scope {
     new AsyncLocalStorage<Scope>());
   public static globals: Scope[] = (globalThis.__ALCHEMY_GLOBALS__ ??= []);
 
+  private static exitHandlerInstalled = false;
+
   public static getScope(): Scope | undefined {
     const scope = Scope.storage.getStore();
     if (!scope) {
@@ -144,6 +147,7 @@ export class Scope {
   private finalized = false;
   private startedAt = performance.now();
   private deferred: (() => Promise<any>)[] = [];
+  private cleanups: (() => Promise<void>)[] = [];
 
   public get appName(): string {
     if (this.parent) {
@@ -177,6 +181,12 @@ export class Scope {
       throw new Error("Phase is required");
     }
     this.phase = phase;
+
+    // Install exit handlers on first root scope creation
+    if (!this.parent && !Scope.exitHandlerInstalled) {
+      Scope.exitHandlerInstalled = true;
+      this.installExitHandlers();
+    }
 
     this.logger = this.quiet
       ? createDummyLogger()
@@ -535,6 +545,46 @@ export class Scope {
       return this.run(() => fn()).then(_resolve, _reject);
     });
     return promise;
+  }
+
+  /**
+   * Install global process exit handlers to ensure cleanup
+   */
+  private installExitHandlers() {
+    if (this.parent) return;
+    onExit((code, signal) => {
+      if (this.cleanups.length === 0) return;
+      this.logger.log(
+        `Received ${signal}, running ${this.cleanups.length} cleanup functions... (code: ${code})`,
+      );
+      Promise.allSettled(this.cleanups.map((cleanup) => cleanup())).then(() => {
+        console.log("Exiting with code:", code);
+        process.exit(code);
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Register a cleanup function that will be called when the scope is finalized.
+   * The provided function should create resources and return an object with a cleanup function.
+   * This should only be called on the root scope to ensure proper cleanup.
+   */
+  public async spawn<T extends { cleanup: () => Promise<void> }>(
+    fn: () => Promise<T> | T,
+  ): Promise<T> {
+    // If not root scope, delegate to root
+    if (this.parent !== undefined) {
+      return this.root.spawn(fn);
+    }
+
+    // Execute the function to get the resource and cleanup
+    const result = await fn();
+
+    // Register the cleanup function
+    this.cleanups.push(result.cleanup);
+
+    return result;
   }
 
   /**
