@@ -754,75 +754,6 @@ const _Worker = Resource(
     const local = this.scope.local && !props.dev?.remote;
     const watch = this.scope.watch;
 
-    if (local) {
-      let url: string | undefined;
-      if (bundleSourceResult.isErr()) {
-        throw bundleSourceResult.error;
-      }
-
-      if (props.dev?.command) {
-        const { url: commandUrl } = await createDevCommand({
-          id,
-          command: props.dev.command,
-          cwd: props.dev.cwd || props.cwd || process.cwd(),
-          env: {
-            ...(process.env ?? {}),
-            ...props.env,
-            ...Object.fromEntries(
-              Object.entries(props.bindings ?? {}).flatMap(([key, value]) =>
-                typeof value === "string"
-                  ? [[key, value]]
-                  : isSecret(value)
-                    ? [[key, value.unencrypted]]
-                    : [],
-              ),
-            ),
-          },
-        });
-        url = commandUrl;
-      } else {
-        url = await createMiniflare({
-          id,
-          workerName,
-          compatibilityDate,
-          compatibilityFlags,
-          bindings: props.bindings,
-          bundle: bundleSourceResult.value,
-          port: props.dev?.port,
-          assets: props.assets,
-        });
-      }
-
-      return this({
-        type: "service",
-        id,
-        entrypoint: props.entrypoint,
-        name: workerName,
-        cwd: relativeCwd,
-        compatibilityDate,
-        compatibilityFlags,
-        format: props.format || "esm", // Include format in the output
-        bindings: normalizeExportBindings(workerName, props.bindings),
-        env: props.env,
-        observability: props.observability,
-        createdAt: this.output?.createdAt ?? Date.now(),
-        updatedAt: Date.now(),
-        eventSources: props.eventSources,
-        url,
-        dev: props.dev,
-        // Include assets configuration in the output
-        assets: props.assets,
-        // Include cron triggers in the output
-        crons: props.crons,
-        // Include placement configuration in the output
-        placement: props.placement,
-        // Include limits configuration in the output
-        limits: props.limits,
-        // phantom property
-        Env: undefined!,
-      } as unknown as Worker<B>);
-    }
-
     const api = await createCloudflareApi(props);
 
     if (this.phase === "delete") {
@@ -843,7 +774,7 @@ const _Worker = Resource(
 
     const bundleSource = bundleSourceResult.value;
 
-    if (this.phase === "update") {
+    if (this.phase === "update" && !local) {
       const oldName = this.output.name ?? this.output.id;
       const newName = workerName;
 
@@ -905,7 +836,7 @@ const _Worker = Resource(
       });
     };
 
-    if (this.phase === "create") {
+    if (this.phase === "create" && !local) {
       if (props.version) {
         // When version is specified, we adopt existing workers or create them if they don't exist
         if (!(await workerExists(api, workerName))) {
@@ -922,8 +853,42 @@ const _Worker = Resource(
       }
     }
 
-    let putWorkerResult: PutWorkerResult;
-    if (watch) {
+    let putWorkerResult: PutWorkerResult | undefined;
+    let localUrl: string | undefined;
+    if (local) {
+      if (props.dev?.command) {
+        const { url: commandUrl } = await createDevCommand({
+          id,
+          command: props.dev.command,
+          cwd: props.dev.cwd || props.cwd || process.cwd(),
+          env: {
+            ...(process.env ?? {}),
+            ...props.env,
+            ...Object.fromEntries(
+              Object.entries(props.bindings ?? {}).flatMap(([key, value]) =>
+                typeof value === "string"
+                  ? [[key, value]]
+                  : isSecret(value)
+                    ? [[key, value.unencrypted]]
+                    : [],
+              ),
+            ),
+          },
+        });
+        localUrl = commandUrl;
+      } else {
+        localUrl = await createMiniflare({
+          id,
+          workerName,
+          compatibilityDate,
+          compatibilityFlags,
+          bindings: props.bindings,
+          bundle: bundleSourceResult.value,
+          port: props.dev?.port,
+          assets: props.assets,
+        });
+      }
+    } else if (watch) {
       const controller = new AbortController();
       cleanups.push(() => controller.abort());
       const promise = new DeferredPromise<PutWorkerResult>();
@@ -987,36 +952,45 @@ const _Worker = Resource(
 
     const tasks: Promise<unknown>[] = [];
 
-    for (const workflow of workflowsBindings) {
-      if (
-        workflow.scriptName === undefined ||
-        workflow.scriptName === workerName
-      ) {
-        tasks.push(
-          upsertWorkflow(api, {
-            workflowName: workflow.workflowName,
-            className: workflow.className,
-            scriptName: workflow.scriptName ?? workerName,
-          }),
-        );
+    if (!local) {
+      for (const workflow of workflowsBindings) {
+        if (
+          workflow.scriptName === undefined ||
+          workflow.scriptName === workerName
+        ) {
+          tasks.push(
+            upsertWorkflow(api, {
+              workflowName: workflow.workflowName,
+              className: workflow.className,
+              scriptName: workflow.scriptName ?? workerName,
+            }),
+          );
+        }
       }
     }
 
     if (containersBindings.length > 0) {
       tasks.push(
-        getVersionMetadata(api, workerName, putWorkerResult.deployment_id).then(
-          (versionMetadata) =>
-            provisionContainers(api, {
-              scriptName: workerName,
-              containers: containersBindings,
-              bindings: versionMetadata.resources.bindings,
-              noop: local,
-            }),
+        getVersionMetadata(
+          api,
+          workerName,
+          // TODO: where does the deployment id come from if we're running locally? don't want to tear it down
+          putWorkerResult?.deployment_id,
+        ).then((versionMetadata) =>
+          provisionContainers(api, {
+            scriptName: workerName,
+            containers: containersBindings,
+            bindings: versionMetadata.resources.bindings,
+            noop: local,
+          }),
         ),
       );
     }
 
-    if (!isDeepStrictEqual(props.crons, this.output?.crons)) {
+    // TODO: this shouldn't be updated if we're running locally, but it should be updated in subsequent runs.
+    // As is, this.output.crons would be updated to props.crons even if it's not updated.
+    // Should we not do that?
+    if (!isDeepStrictEqual(props.crons, this.output?.crons) && !local) {
       tasks.push(
         api.put(
           `/accounts/${api.accountId}/workers/scripts/${workerName}/schedules`,
@@ -1051,7 +1025,7 @@ const _Worker = Resource(
         scriptName: workerName,
         enable: props.url ?? dispatchNamespace === undefined,
         previewVersionId:
-          props.version && putWorkerResult.metadata.has_preview
+          props.version && putWorkerResult?.metadata.has_preview
             ? putWorkerResult.id
             : undefined,
         retain: !!props.version,
@@ -1081,7 +1055,7 @@ const _Worker = Resource(
       createdAt: this.output?.createdAt ?? now,
       updatedAt: now,
       eventSources: props.eventSources,
-      url: subdomain?.url,
+      url: local ? localUrl : subdomain?.url,
       dev: props.dev,
       // Include assets configuration in the output
       assets: props.assets,
