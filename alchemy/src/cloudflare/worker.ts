@@ -746,8 +746,7 @@ const _Worker = Resource(
       compatibilityDate,
       compatibilityFlags,
       outdir:
-        props.bundle?.outdir ??
-        path.join(cwd, ".alchemy", ...this.scope.chain, id),
+        props.bundle?.outdir ?? path.join(cwd, ".alchemy", "out", workerName),
       sourceMap: "sourceMap" in props ? props.sourceMap : undefined,
     });
 
@@ -1011,6 +1010,7 @@ const _Worker = Resource(
               scriptName: workerName,
               containers: containersBindings,
               bindings: versionMetadata.resources.bindings,
+              noop: local,
             }),
         ),
       );
@@ -1030,20 +1030,22 @@ const _Worker = Resource(
         scriptName: workerName,
         eventSources: props.eventSources,
         adopt: props.adopt,
+        noop: local,
       }),
     );
 
     const [domains, routes, subdomain] = await Promise.all([
-      // TODO: can you provision domains and routes in parallel, or is there a dependency?
       provisionDomains(api, {
         scriptName: workerName,
         adopt: props.adopt,
         domains: props.domains,
+        noop: local,
       }),
       provisionRoutes(api, {
         scriptName: workerName,
         adopt: props.adopt,
         routes: props.routes,
+        noop: local,
       }),
       provisionSubdomain(api, {
         scriptName: workerName,
@@ -1055,6 +1057,7 @@ const _Worker = Resource(
         retain: !!props.version,
         forceDelete:
           this.phase === "create" && !!props.adopt && props.url === false,
+        noop: local,
       }),
       ...tasks,
     ]);
@@ -1166,11 +1169,15 @@ async function provisionContainers(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    containers?: Container[];
+    containers: Container[] | undefined;
     bindings: WorkerBindingSpec[];
+    noop: boolean | undefined;
   },
 ): Promise<ContainerApplication[] | undefined> {
   if (!props.containers?.length) {
+    return;
+  }
+  if (props.noop) {
     return;
   }
   return await Promise.all(
@@ -1193,6 +1200,7 @@ async function provisionContainers(
         },
         schedulingPolicy: container.schedulingPolicy,
         adopt: container.adopt,
+        noop: props.noop,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1205,9 +1213,13 @@ async function provisionEventSources(
     scriptName: string;
     eventSources?: EventSource[];
     adopt?: boolean;
+    noop?: boolean;
   },
 ): Promise<QueueConsumer[] | undefined> {
   if (!props.eventSources?.length) {
+    return;
+  }
+  if (props.noop) {
     return;
   }
   return await Promise.all(
@@ -1220,6 +1232,7 @@ async function provisionEventSources(
             ? { deadLetterQueue: eventSource.dlq }
             : undefined,
           adopt: props.adopt,
+          noop: props.noop,
           ...normalizeApiOptions(api),
         });
       }
@@ -1229,6 +1242,7 @@ async function provisionEventSources(
           scriptName: props.scriptName,
           settings: eventSource.settings,
           adopt: props.adopt,
+          noop: props.noop,
           ...normalizeApiOptions(api),
         });
       }
@@ -1241,8 +1255,9 @@ async function provisionDomains(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    adopt?: boolean;
-    domains?: WorkerProps["domains"];
+    adopt: boolean | undefined;
+    domains: WorkerProps["domains"] | undefined;
+    noop: boolean | undefined;
   },
 ): Promise<CustomDomain[] | undefined> {
   if (!props.domains?.length) {
@@ -1270,6 +1285,7 @@ async function provisionDomains(
         name: domain.name,
         zoneId: domain.zoneId,
         adopt: domain.adopt,
+        noop: props.noop,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1280,8 +1296,9 @@ async function provisionRoutes(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    adopt?: boolean;
-    routes?: WorkerProps["routes"];
+    adopt: boolean | undefined;
+    routes: WorkerProps["routes"] | undefined;
+    noop: boolean | undefined;
   },
 ): Promise<Route[] | undefined> {
   if (!props.routes?.length) {
@@ -1308,6 +1325,7 @@ async function provisionRoutes(
         script: props.scriptName,
         zoneId: route.zoneId,
         adopt: route.adopt,
+        noop: props.noop,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1322,6 +1340,7 @@ async function provisionSubdomain(
     previewVersionId: string | undefined;
     retain: boolean;
     forceDelete: boolean;
+    noop: boolean | undefined;
   },
 ): Promise<WorkerSubdomain | undefined> {
   if (props.enable) {
@@ -1329,6 +1348,7 @@ async function provisionSubdomain(
       scriptName: props.scriptName,
       previewVersionId: props.previewVersionId,
       retain: props.retain,
+      noop: props.noop,
       ...normalizeApiOptions(api),
     });
   }
