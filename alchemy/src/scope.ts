@@ -476,6 +476,8 @@ export class Scope {
     });
 
     if (!this.parent && process.env.ALCHEMY_TEST_KILL_ON_FINALIZE) {
+      this.logger.log("[debug] Killing on finalize");
+      await Promise.allSettled(this.cleanups.map((cleanup) => cleanup()));
       process.exit(0);
     }
   }
@@ -582,7 +584,12 @@ export class Scope {
     const result = await fn();
 
     // Register the cleanup function
-    this.cleanups.push(result.cleanup);
+    let cleanupPromise: Promise<void> | undefined;
+    const once = async () => {
+      cleanupPromise ??= result.cleanup();
+      await cleanupPromise;
+    };
+    this.cleanups.push(once);
 
     return result;
   }
