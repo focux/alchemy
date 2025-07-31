@@ -85,7 +85,8 @@ export class TelemetryClient implements ITelemetryClient {
     if (events.length === 0) {
       return;
     }
-    const { userId, ...context } = await this.context;
+    const { userId, projectId, ...context } = await this.context;
+    const safeProjectId = projectId ?? `temp_${userId}`;
     const groupResponse = await fetch(`${POSTHOG_CLIENT_API_HOST}/i/v0/e/`, {
       method: "POST",
       headers: {
@@ -97,7 +98,7 @@ export class TelemetryClient implements ITelemetryClient {
         distinct_id: "project-identify",
         properties: {
           $group_type: "project",
-          $group_key: context.projectId,
+          $group_key: safeProjectId,
         },
       }),
     });
@@ -120,7 +121,8 @@ export class TelemetryClient implements ITelemetryClient {
             distinct_id: userId,
             ...context,
             ...properties,
-            $groups: { project: context.projectId },
+            projectId: safeProjectId,
+            $groups: { project: safeProjectId },
           },
           timestamp: new Date(timestamp).toISOString(),
         })),
