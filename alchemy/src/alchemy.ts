@@ -61,6 +61,10 @@ function parseCliArgs(): Partial<AlchemyOptions> {
     options.password = process.env.ALCHEMY_PASSWORD;
   }
 
+  if (args.includes("--waitForRootCDP")) {
+    options.waitForRootCDPServer = true;
+  }
+
   return options;
 }
 
@@ -197,6 +201,7 @@ async function _alchemy(
       phase,
       password: mergedOptions?.password ?? process.env.ALCHEMY_PASSWORD,
       telemetryClient,
+      waitForRootCDPServer: mergedOptions.waitForRootCDPServer ?? false,
     });
     const stageName = mergedOptions?.stage ?? DEFAULT_STAGE;
     const stage = new Scope({
@@ -396,6 +401,12 @@ export interface AlchemyOptions {
    * If not provided, the default fallback logger will be used.
    */
   logger?: LoggerApi;
+  /**
+   * Determines if alchemy should wait for a root CDP server to connect before deploying resources
+   *
+   * @default false
+   */
+  waitForRootCDPServer?: boolean;
 }
 
 export interface ScopeOptions extends AlchemyOptions {

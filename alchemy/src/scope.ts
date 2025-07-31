@@ -15,6 +15,7 @@ import {
 import type { State, StateStore, StateStoreType } from "./state.ts";
 import { D1StateStore } from "./state/d1-state-store.ts";
 import { FileSystemStateStore } from "./state/file-system-state-store.ts";
+import { CoreCDPServer } from "./tooling/cdp-server.ts";
 import {
   createDummyLogger,
   createLoggerInstance,
@@ -41,6 +42,7 @@ export interface ScopeOptions {
   dev?: "prefer-local" | "prefer-remote";
   telemetryClient?: ITelemetryClient;
   logger?: LoggerApi;
+  waitForRootCDPServer?: boolean;
 }
 
 export type PendingDeletions = Array<{
@@ -111,6 +113,8 @@ export class Scope {
   public readonly logger: LoggerApi;
   public readonly telemetryClient: ITelemetryClient;
   public readonly dataMutex: AsyncMutex;
+  public readonly cdpServer?: CoreCDPServer;
+  public readonly waitForRootCDPServer: boolean;
 
   private isErrored = false;
   private finalized = false;
@@ -179,6 +183,11 @@ export class Scope {
     this.telemetryClient =
       options.telemetryClient ?? this.parent?.telemetryClient!;
     this.dataMutex = new AsyncMutex();
+    //todo(michael): add option to disable
+    this.waitForRootCDPServer = options.waitForRootCDPServer ?? false;
+    if (this.parent == null) {
+      this.cdpServer = new CoreCDPServer();
+    }
   }
 
   public get root(): Scope {
@@ -232,6 +241,12 @@ export class Scope {
       this.telemetryClient.ready.catch((error) => {
         this.logger.warn("Telemetry initialization failed:", error);
       }),
+      //todo(michael): add option to disable
+      this.waitForRootCDPServer
+        ? this.root.cdpServer?.waitForRootCDP().catch((error) => {
+            this.logger.warn("CDP initialization failed:", error);
+          })
+        : new Promise<void>((r) => r()),
     ]);
   }
 

@@ -6,6 +6,7 @@ import z from "zod";
 import { detectRuntime } from "../../src/util/detect-node-runtime.ts";
 import { detectPackageManager } from "../../src/util/detect-package-manager.ts";
 import { exists } from "../../src/util/exists.ts";
+import { promiseWithResolvers } from "../../src/util/promise-with-resolvers.ts";
 
 export const entrypoint = z
   .string()
@@ -70,6 +71,8 @@ export async function execAlchemy(
   if (watch) execArgs.push("--watch");
   if (envFile) execArgs.push(`--env-file ${envFile}`);
   if (dev) args.push("--dev");
+  if (dev) execArgs.push("--inspect");
+  if (dev) args.push("--waitForRootCDP");
 
   // Check for alchemy.run.ts or alchemy.run.js (if not provided)
   if (!main) {
@@ -136,17 +139,60 @@ export async function execAlchemy(
       }
   }
 
+  const { promise: inspectorUrlPromise, resolve: resolveInspectorUrl } =
+    promiseWithResolvers<string | undefined>();
+  let inspectorUrl: string | undefined;
+  const { promise: cdpServerPromise, resolve: resolveCdpServer } =
+    promiseWithResolvers<string | undefined>();
+  let cdpServer: string | undefined;
+
   try {
-    console.log(command);
-    await execa(command, {
+    const subprocess = execa(command, {
       cwd,
       shell: true,
-      stdio: "inherit",
+      stdio: ["inherit", "pipe", "pipe"],
       env: {
         ...process.env,
         FORCE_COLOR: "1",
       },
     });
+
+    if (subprocess.stdout) {
+      subprocess.stdout.on("data", (data) => {
+        const string = data.toString();
+        const cdpServerMatch = string.match(/CDP\sServer\sstarted\sat\s(.*)/);
+        if (cdpServerMatch) {
+          cdpServer = cdpServerMatch[1];
+          resolveCdpServer(cdpServer);
+        }
+        process.stdout.write(data);
+      });
+    }
+
+    if (subprocess.stderr) {
+      subprocess.stderr.on("data", (data) => {
+        const string = data.toString();
+        //* bun inspector url seems to always be on 6499
+        //todo(michael): support node and deno
+        const bunInspectorMatch = string.match(
+          /ws:\/\/localhost:6499\/[a-zA-z0-9]*/,
+        );
+        if (bunInspectorMatch) {
+          inspectorUrl = bunInspectorMatch[0];
+          console.log("Bun Inspector Url", inspectorUrl);
+          resolveInspectorUrl(inspectorUrl);
+        }
+        process.stderr.write(data);
+      });
+    }
+
+    await Promise.all([inspectorUrlPromise, cdpServerPromise]);
+    await fetch(`${cdpServer!}/register-root-cdp`, {
+      method: "POST",
+      body: inspectorUrl,
+    });
+
+    await subprocess;
   } catch (error: any) {
     log.error(pc.red(`Deploy failed: ${error.message}`));
     if (error.stdout) {
@@ -155,6 +201,7 @@ export async function execAlchemy(
     if (error.stderr) {
       console.error(error.stderr);
     }
+
     process.exit(1);
   }
 }
