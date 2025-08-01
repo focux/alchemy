@@ -10,7 +10,7 @@ import type { Telemetry } from "./types.ts";
 
 export interface TelemetryClientOptions {
   sessionId: string;
-  phase: Phase;
+  phase?: Phase;
   enabled: boolean;
   quiet: boolean;
 }

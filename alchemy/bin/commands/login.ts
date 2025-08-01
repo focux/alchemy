@@ -3,7 +3,7 @@ import pc from "picocolors";
 import { zod as z } from "trpc-cli";
 import { DEFAULT_SCOPES, wranglerLogin } from "../../src/cloudflare/oauth.ts";
 import { throwWithContext } from "../errors.ts";
-import { loggedProcedure } from "../trpc.ts";
+import { loggedProcedure, ExitSignal } from "../trpc.ts";
 
 export const login = loggedProcedure
   .meta({
@@ -58,6 +58,6 @@ export const login = loggedProcedure
       } else {
         log.error(pc.red(String(error)));
       }
-      process.exit(1);
+      throw new ExitSignal(1);
     }
   });
