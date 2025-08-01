@@ -18,14 +18,14 @@ import { detectPackageManager } from "../../src/util/detect-package-manager.ts";
 import type { DependencyVersionMap } from "../constants.ts";
 import { throwWithContext } from "../errors.ts";
 import { addPackageDependencies } from "../services/dependencies.ts";
-import { t } from "../trpc.ts";
+import { loggedProcedure } from "../trpc.ts";
 import {
   TemplateSchema,
   type InitContext,
   type TemplateType,
 } from "../types.ts";
 
-export const init = t.procedure
+export const init = loggedProcedure
   .meta({
     description: "Initialize Alchemy in an existing project",
   })

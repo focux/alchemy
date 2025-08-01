@@ -3,9 +3,9 @@ import pc from "picocolors";
 import { zod as z } from "trpc-cli";
 import { DEFAULT_SCOPES, wranglerLogin } from "../../src/cloudflare/oauth.ts";
 import { throwWithContext } from "../errors.ts";
-import { t } from "../trpc.ts";
+import { loggedProcedure } from "../trpc.ts";
 
-export const login = t.procedure
+export const login = loggedProcedure
   .meta({
     description: "Login to Cloudflare",
   })

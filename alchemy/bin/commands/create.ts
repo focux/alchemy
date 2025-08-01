@@ -21,7 +21,7 @@ import { addGitHubWorkflowToAlchemy } from "../services/github-workflow.ts";
 import { installDependencies } from "../services/package-manager.ts";
 import { copyTemplate } from "../services/template-manager.ts";
 import { ensureVibeRulesPostinstall } from "../services/vibe-rules.ts";
-import { t } from "../trpc.ts";
+import { loggedProcedure } from "../trpc.ts";
 import type {
   CreateInput,
   EditorType,
@@ -38,7 +38,7 @@ import {
 
 const isTest = process.env.NODE_ENV === "test";
 
-export const create = t.procedure
+export const create = loggedProcedure
   .meta({
     description: "Create a new Alchemy project",
     negateBooleans: true,
