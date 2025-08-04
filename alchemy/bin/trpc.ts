@@ -30,15 +30,13 @@ const loggingMiddleware = t.middleware(async ({ path, next }) => {
     return result;
   } catch (error) {
     telemetry.record({
-      event: "cli.error",
+      event:
+        error instanceof ExitSignal && error.code === 0
+          ? "cli.success"
+          : "cli.error",
       command: path,
     });
-
     if (error instanceof ExitSignal) {
-      telemetry.record({
-        event: error.code === 0 ? "cli.success" : "cli.error",
-        command: path,
-      });
       exitCode = error.code;
     } else {
       throw error;
