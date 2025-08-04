@@ -87,10 +87,10 @@ export interface QueueConsumerProps extends CloudflareApiOptions {
    * If true, the queue consumer will not be created, but will be retained if it already exists.
    * This is used for local development.
    *
-   * @default false
+   * @default `false`
    * @internal
    */
-  noop?: boolean;
+  dev?: boolean;
 }
 
 /**
@@ -178,7 +178,7 @@ export const QueueConsumer = Resource(
       return this.destroy();
     }
 
-    if (props.noop) {
+    if (this.scope.local && props.dev) {
       return this({
         id: this.output?.id ?? "noop-queue-consumer",
         queueId,

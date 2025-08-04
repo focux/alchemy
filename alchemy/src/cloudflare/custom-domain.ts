@@ -48,10 +48,10 @@ export interface CustomDomainProps extends CloudflareApiOptions {
    * If true, the custom domain will not be created, but will be retained if it already exists.
    * This is used for local development.
    *
-   * @default false
+   * @default `Scope.local`
    * @internal
    */
-  noop?: boolean;
+  dev?: boolean;
 }
 
 /**
@@ -131,7 +131,7 @@ export const CustomDomain = Resource(
       return this.destroy();
     }
 
-    if (props.noop) {
+    if (this.scope.local && props.dev) {
       const now = Date.now();
       return this({
         ...props,

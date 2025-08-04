@@ -53,10 +53,10 @@ export interface RouteProps extends CloudflareApiOptions {
    * If true, the route will not be created, but will be retained if it already exists.
    * This is used for local development.
    *
-   * @default false
+   * @default `false`
    * @internal
    */
-  noop?: boolean;
+  dev?: boolean;
 }
 
 /**
@@ -159,7 +159,7 @@ export const Route = Resource(
       return this.destroy();
     }
 
-    if (props.noop) {
+    if (this.scope.local && props.dev) {
       // Get or infer zone ID for noop mode too
       let zoneId = props.zoneId;
       if (!zoneId) {

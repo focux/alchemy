@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import { isDeepStrictEqual } from "node:util";
 import path from "pathe";
 import type { Context } from "../context.ts";
 import type { BundleProps } from "../esbuild/bundle.ts";
@@ -986,35 +985,39 @@ const _Worker = Resource(
 
     const tasks: Promise<unknown>[] = [];
 
-    for (const workflow of workflowsBindings) {
-      if (
-        workflow.scriptName === undefined ||
-        workflow.scriptName === workerName
-      ) {
-        tasks.push(
-          upsertWorkflow(api, {
-            workflowName: workflow.workflowName,
-            className: workflow.className,
-            scriptName: workflow.scriptName ?? workerName,
-          }),
-        );
-      }
+    if (!local) {
+      tasks.push(
+        ...workflowsBindings.flatMap((workflow) => {
+          if (
+            workflow.scriptName === undefined ||
+            workflow.scriptName === workerName
+          ) {
+            return [
+              upsertWorkflow(api, {
+                workflowName: workflow.workflowName,
+                className: workflow.className,
+                scriptName: workflow.scriptName ?? workerName,
+              }),
+            ];
+          }
+          return [];
+        }),
+      );
     }
 
     if (containersBindings.length > 0) {
       tasks.push(
-        getVersionMetadata(api, workerName, putWorkerResult.deployment_id).then(
-          (versionMetadata) =>
-            provisionContainers(api, {
-              scriptName: workerName,
-              containers: containersBindings,
-              bindings: versionMetadata.resources.bindings,
-            }),
-        ),
+        provisionContainers(api, {
+          scriptName: workerName,
+          containers: containersBindings,
+          ...(this.scope.local && !props.dev?.remote
+            ? { dev: true, deploymentId: undefined }
+            : { dev: false, deploymentId: putWorkerResult.deployment_id }),
+        }),
       );
     }
 
-    if (!isDeepStrictEqual(props.crons, this.output?.crons)) {
+    if (!local) {
       tasks.push(
         api.put(
           `/accounts/${api.accountId}/workers/scripts/${workerName}/schedules`,
@@ -1032,16 +1035,17 @@ const _Worker = Resource(
     );
 
     const [domains, routes, subdomain] = await Promise.all([
-      // TODO: can you provision domains and routes in parallel, or is there a dependency?
       provisionDomains(api, {
         scriptName: workerName,
         adopt: props.adopt,
         domains: props.domains,
+        dev: this.scope.local && !props.dev?.remote,
       }),
       provisionRoutes(api, {
         scriptName: workerName,
         adopt: props.adopt,
         routes: props.routes,
+        dev: this.scope.local && !props.dev?.remote,
       }),
       provisionSubdomain(api, {
         scriptName: workerName,
@@ -1053,6 +1057,7 @@ const _Worker = Resource(
         retain: !!props.version,
         forceDelete:
           this.phase === "create" && !!props.adopt && props.url === false,
+        dev: this.scope.local && !props.dev?.remote,
       }),
       ...tasks,
     ]);
@@ -1146,35 +1151,54 @@ const normalizeApiOptions = (
 
 async function provisionContainers(
   api: CloudflareApi,
-  props: {
-    scriptName: string;
-    containers?: Container[];
-    bindings: WorkerBindingSpec[];
-  },
+  props:
+    | {
+        scriptName: string;
+        containers: Container[] | undefined;
+        deploymentId: string;
+        dev: false;
+      }
+    | {
+        scriptName: string;
+        containers: Container[] | undefined;
+        deploymentId: undefined;
+        dev: true;
+      },
 ): Promise<ContainerApplication[] | undefined> {
   if (!props.containers?.length) {
     return;
   }
+  const versionMetadataPromise = props.deploymentId
+    ? getVersionMetadata(api, props.scriptName, props.deploymentId)
+    : undefined;
+  const getNamespaceId = async (container: Container) => {
+    if (!versionMetadataPromise) {
+      return container.id;
+    }
+    const versionMetadata = await versionMetadataPromise;
+    const binding = versionMetadata.resources.bindings.find(
+      (binding): binding is WorkerBindingDurableObjectNamespace =>
+        binding.type === "durable_object_namespace" &&
+        binding.class_name === container.className,
+    );
+    if (!binding?.namespace_id) {
+      throw new Error(`Namespace ID not found for container ${container.id}`);
+    }
+    return binding.namespace_id;
+  };
   return await Promise.all(
-    props.containers.map((container) => {
-      const namespaceId = props.bindings.find(
-        (binding): binding is WorkerBindingDurableObjectNamespace =>
-          binding.type === "durable_object_namespace" &&
-          binding.class_name === container.className,
-      )?.namespace_id;
-      if (!namespaceId) {
-        throw new Error(`Namespace ID not found for container ${container.id}`);
-      }
+    props.containers.map(async (container) => {
       return ContainerApplication(container.id, {
         image: container.image,
         name: container.name,
         instanceType: container.instanceType,
         observability: container.observability,
         durableObjects: {
-          namespaceId,
+          namespaceId: await getNamespaceId(container),
         },
         schedulingPolicy: container.schedulingPolicy,
         adopt: container.adopt,
+        dev: props.dev,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1223,8 +1247,9 @@ async function provisionDomains(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    adopt?: boolean;
-    domains?: WorkerProps["domains"];
+    adopt: boolean | undefined;
+    domains: WorkerProps["domains"] | undefined;
+    dev: boolean | undefined;
   },
 ): Promise<CustomDomain[] | undefined> {
   if (!props.domains?.length) {
@@ -1252,6 +1277,7 @@ async function provisionDomains(
         name: domain.name,
         zoneId: domain.zoneId,
         adopt: domain.adopt,
+        dev: props.dev,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1262,8 +1288,9 @@ async function provisionRoutes(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    adopt?: boolean;
-    routes?: WorkerProps["routes"];
+    adopt: boolean | undefined;
+    routes: WorkerProps["routes"] | undefined;
+    dev: boolean | undefined;
   },
 ): Promise<Route[] | undefined> {
   if (!props.routes?.length) {
@@ -1304,6 +1331,7 @@ async function provisionSubdomain(
     previewVersionId: string | undefined;
     retain: boolean;
     forceDelete: boolean;
+    dev: boolean | undefined;
   },
 ): Promise<WorkerSubdomain | undefined> {
   if (props.enable) {
@@ -1311,6 +1339,7 @@ async function provisionSubdomain(
       scriptName: props.scriptName,
       previewVersionId: props.previewVersionId,
       retain: props.retain,
+      dev: props.dev,
       ...normalizeApiOptions(api),
     });
   }
