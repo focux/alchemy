@@ -1,6 +1,6 @@
 {
   "name": "alchemy",
-  "version": "0.55.3",
+  "version": "0.56.0",
   "license": "Apache-2.0",
   "author": "Sam Goodwin <sam@alchemy.run>",
   "homepage": "https://alchemy.run",
@@ -93,6 +93,10 @@
       "bun": "./src/planetscale/index.ts",
       "import": "./lib/planetscale/index.js"
     },
+    "./random": {
+      "bun": "./src/random/index.ts",
+      "import": "./lib/random/index.js"
+    },
     "./sentry": {
       "bun": "./src/sentry/index.ts",
       "import": "./lib/sentry/index.js"
@@ -183,7 +187,6 @@
     "arktype": "^2.0.0",
     "cloudflare": "^4.0.0",
     "drizzle-orm": "^0.44.2",
-
     "hono": "^4.0.0",
     "prettier": "^3.0.0",
     "stripe": "^17.0.0"
