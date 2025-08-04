@@ -624,7 +624,12 @@ function processBindings(
       });
     } else if (binding.type === "kv_namespace") {
       // KV Namespace binding
-      const id = "namespaceId" in binding ? binding.namespaceId : binding.id;
+      const id =
+        "dev" in binding && !binding.dev?.remote
+          ? binding.dev.id
+          : "namespaceId" in binding
+            ? binding.namespaceId
+            : binding.id;
       kvNamespaces.push({
         binding: bindingName,
         id: id,
@@ -654,7 +659,7 @@ function processBindings(
       r2Buckets.push({
         binding: bindingName,
         bucket_name: binding.name,
-        preview_bucket_name: binding.name,
+        preview_bucket_name: binding.dev.remote ? binding.name : binding.dev.id,
         ...(binding.dev?.remote ? { experimental_remote: true } : {}),
       });
     } else if (binding.type === "secret") {
@@ -678,13 +683,13 @@ function processBindings(
         database_id: binding.id,
         database_name: binding.name,
         migrations_dir: binding.migrationsDir,
-        preview_database_id: binding.id,
+        preview_database_id: binding.dev.remote ? binding.id : binding.dev.id,
         ...(binding.dev?.remote ? { experimental_remote: true } : {}),
       });
     } else if (binding.type === "queue") {
       queues.producers.push({
         binding: bindingName,
-        queue: binding.name,
+        queue: binding.dev.remote ? binding.name : binding.dev.id,
       });
     } else if (binding.type === "vectorize") {
       vectorizeIndexes.push({
