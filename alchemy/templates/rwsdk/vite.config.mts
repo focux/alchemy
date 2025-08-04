@@ -1,6 +1,6 @@
+import alchemyRedwood from "alchemy/cloudflare/redwood";
 import { defineConfig } from "vite";
-import { redwood } from "rwsdk/vite";
 
 export default defineConfig({
-  plugins: [redwood()],
+  plugins: [alchemyRedwood()],
 });

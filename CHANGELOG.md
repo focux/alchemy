@@ -1,3 +1,22 @@
+## v0.57.0
+
+### &nbsp;&nbsp;&nbsp;🚀 Features
+
+- **cloudflare**: Alchemy vite plugin &nbsp;-&nbsp; by **John Royal** in https://github.com/sam-goodwin/alchemy/issues/758 [<samp>(f58bc)</samp>](https://github.com/sam-goodwin/alchemy/commit/f58bcd38)
+- **random**: Add RandomString resource and alchemy/random export &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/785 [<samp>(73bc9)</samp>](https://github.com/sam-goodwin/alchemy/commit/73bc99c7)
+
+### &nbsp;&nbsp;&nbsp;🐞 Bug Fixes
+
+- **cloudflare**:
+  - From xdg-app-paths to env-paths &nbsp;-&nbsp; by **Justin Bennett** in https://github.com/sam-goodwin/alchemy/issues/779 [<samp>(86246)</samp>](https://github.com/sam-goodwin/alchemy/commit/86246832)
+  - Improve error logging when failing to create an empty worker &nbsp;-&nbsp; by **John Royal** in https://github.com/sam-goodwin/alchemy/issues/751 [<samp>(beb9a)</samp>](https://github.com/sam-goodwin/alchemy/commit/beb9ab9c)
+- **core**:
+  - Synchronous alchemy.env and alchemy.secret.env &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/786 [<samp>(a3989)</samp>](https://github.com/sam-goodwin/alchemy/commit/a398935b)
+
+##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/sam-goodwin/alchemy/compare/v0.56.0...v0.57.0)
+
+---
+
 ## v0.56.0
 
 ### &nbsp;&nbsp;&nbsp;🚀 Features

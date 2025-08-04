@@ -1,13 +1,10 @@
-import { spawn } from "node:child_process";
-import fs from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import path from "pathe";
 import type { Context } from "../context.ts";
 import type { BundleProps } from "../esbuild/bundle.ts";
 import { Resource, ResourceKind } from "../resource.ts";
-import { isSecret } from "../secret.ts";
 import type { type } from "../type.ts";
 import { DeferredPromise } from "../util/deferred-promise.ts";
-import { exists } from "../util/exists.ts";
 import { logger } from "../util/logger.ts";
 import { withExponentialBackoff } from "../util/retry.ts";
 import { CloudflareApiError, handleApiError } from "./api-error.ts";
@@ -330,15 +327,10 @@ export interface BaseWorkerProps<
          * @default false
          */
         remote?: boolean;
-        /** @internal */
-        command?: undefined;
+        url?: undefined;
       }
     | {
-        command: string;
-        cwd?: string;
-        /** @internal */
-        port?: undefined;
-        /** @internal */
+        url: string;
         remote?: undefined;
       };
 
@@ -739,8 +731,7 @@ const _Worker = Resource(
       compatibilityDate,
       compatibilityFlags,
       outdir:
-        props.bundle?.outdir ??
-        path.join(cwd, ".alchemy", ...this.scope.chain, id),
+        props.bundle?.outdir ?? path.join(cwd, ".alchemy", "out", workerName),
       sourceMap: "sourceMap" in props ? props.sourceMap : undefined,
     });
 
@@ -754,30 +745,11 @@ const _Worker = Resource(
         throw bundleSourceResult.error;
       }
 
-      if (props.dev?.command) {
-        const result = await createDevCommand({
-          id,
-          command: props.dev.command,
-          cwd: props.dev.cwd || props.cwd || process.cwd(),
-          env: {
-            ...(process.env ?? {}),
-            ...props.env,
-            ...Object.fromEntries(
-              Object.entries(props.bindings ?? {}).flatMap(([key, value]) =>
-                typeof value === "string"
-                  ? [[key, value]]
-                  : isSecret(value)
-                    ? [[key, value.unencrypted]]
-                    : [],
-              ),
-            ),
-          },
-        });
-        url = result.url;
-        this.onCleanup(() => result.cleanup());
+      if (props.dev && "url" in props.dev) {
+        url = props.dev.url;
       } else {
         const { MiniflareController } = await import(
-          "./miniflare/miniflare-controller.ts"
+          "./miniflare/miniflare-controller.js"
         );
         const controller = MiniflareController.singleton;
         url = await controller.add({
@@ -789,7 +761,7 @@ const _Worker = Resource(
           eventSources: props.eventSources,
           assets: props.assets,
           bundle: bundleSourceResult.value,
-          port: props.dev?.port,
+          port: props.dev?.port ?? undefined,
         });
         this.onCleanup(() => controller.dispose());
       }
@@ -848,7 +820,7 @@ const _Worker = Resource(
       const oldName = this.output.name ?? this.output.id;
       const newName = workerName;
 
-      if (oldName !== newName) {
+      if (oldName && oldName !== newName) {
         if (dispatchNamespace) {
           this.replace(true);
         } else {
@@ -985,39 +957,35 @@ const _Worker = Resource(
 
     const tasks: Promise<unknown>[] = [];
 
-    if (!local) {
-      tasks.push(
-        ...workflowsBindings.flatMap((workflow) => {
-          if (
-            workflow.scriptName === undefined ||
-            workflow.scriptName === workerName
-          ) {
-            return [
-              upsertWorkflow(api, {
-                workflowName: workflow.workflowName,
-                className: workflow.className,
-                scriptName: workflow.scriptName ?? workerName,
-              }),
-            ];
-          }
-          return [];
-        }),
-      );
+    for (const workflow of workflowsBindings) {
+      if (
+        workflow.scriptName === undefined ||
+        workflow.scriptName === workerName
+      ) {
+        tasks.push(
+          upsertWorkflow(api, {
+            workflowName: workflow.workflowName,
+            className: workflow.className,
+            scriptName: workflow.scriptName ?? workerName,
+          }),
+        );
+      }
     }
 
     if (containersBindings.length > 0) {
       tasks.push(
-        provisionContainers(api, {
-          scriptName: workerName,
-          containers: containersBindings,
-          ...(this.scope.local && !props.dev?.remote
-            ? { dev: true, deploymentId: undefined }
-            : { dev: false, deploymentId: putWorkerResult.deployment_id }),
-        }),
+        getVersionMetadata(api, workerName, putWorkerResult.deployment_id).then(
+          (versionMetadata) =>
+            provisionContainers(api, {
+              scriptName: workerName,
+              containers: containersBindings,
+              bindings: versionMetadata.resources.bindings,
+            }),
+        ),
       );
     }
 
-    if (!local) {
+    if (!isDeepStrictEqual(props.crons, this.output?.crons)) {
       tasks.push(
         api.put(
           `/accounts/${api.accountId}/workers/scripts/${workerName}/schedules`,
@@ -1035,17 +1003,16 @@ const _Worker = Resource(
     );
 
     const [domains, routes, subdomain] = await Promise.all([
+      // TODO: can you provision domains and routes in parallel, or is there a dependency?
       provisionDomains(api, {
         scriptName: workerName,
         adopt: props.adopt,
         domains: props.domains,
-        dev: this.scope.local && !props.dev?.remote,
       }),
       provisionRoutes(api, {
         scriptName: workerName,
         adopt: props.adopt,
         routes: props.routes,
-        dev: this.scope.local && !props.dev?.remote,
       }),
       provisionSubdomain(api, {
         scriptName: workerName,
@@ -1057,7 +1024,6 @@ const _Worker = Resource(
         retain: !!props.version,
         forceDelete:
           this.phase === "create" && !!props.adopt && props.url === false,
-        dev: this.scope.local && !props.dev?.remote,
       }),
       ...tasks,
     ]);
@@ -1151,54 +1117,35 @@ const normalizeApiOptions = (
 
 async function provisionContainers(
   api: CloudflareApi,
-  props:
-    | {
-        scriptName: string;
-        containers: Container[] | undefined;
-        deploymentId: string;
-        dev: false;
-      }
-    | {
-        scriptName: string;
-        containers: Container[] | undefined;
-        deploymentId: undefined;
-        dev: true;
-      },
+  props: {
+    scriptName: string;
+    containers?: Container[];
+    bindings: WorkerBindingSpec[];
+  },
 ): Promise<ContainerApplication[] | undefined> {
   if (!props.containers?.length) {
     return;
   }
-  const versionMetadataPromise = props.deploymentId
-    ? getVersionMetadata(api, props.scriptName, props.deploymentId)
-    : undefined;
-  const getNamespaceId = async (container: Container) => {
-    if (!versionMetadataPromise) {
-      return container.id;
-    }
-    const versionMetadata = await versionMetadataPromise;
-    const binding = versionMetadata.resources.bindings.find(
-      (binding): binding is WorkerBindingDurableObjectNamespace =>
-        binding.type === "durable_object_namespace" &&
-        binding.class_name === container.className,
-    );
-    if (!binding?.namespace_id) {
-      throw new Error(`Namespace ID not found for container ${container.id}`);
-    }
-    return binding.namespace_id;
-  };
   return await Promise.all(
-    props.containers.map(async (container) => {
+    props.containers.map((container) => {
+      const namespaceId = props.bindings.find(
+        (binding): binding is WorkerBindingDurableObjectNamespace =>
+          binding.type === "durable_object_namespace" &&
+          binding.class_name === container.className,
+      )?.namespace_id;
+      if (!namespaceId) {
+        throw new Error(`Namespace ID not found for container ${container.id}`);
+      }
       return ContainerApplication(container.id, {
         image: container.image,
         name: container.name,
         instanceType: container.instanceType,
         observability: container.observability,
         durableObjects: {
-          namespaceId: await getNamespaceId(container),
+          namespaceId,
         },
         schedulingPolicy: container.schedulingPolicy,
         adopt: container.adopt,
-        dev: props.dev,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1247,9 +1194,8 @@ async function provisionDomains(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    adopt: boolean | undefined;
-    domains: WorkerProps["domains"] | undefined;
-    dev: boolean | undefined;
+    adopt?: boolean;
+    domains?: WorkerProps["domains"];
   },
 ): Promise<CustomDomain[] | undefined> {
   if (!props.domains?.length) {
@@ -1277,7 +1223,6 @@ async function provisionDomains(
         name: domain.name,
         zoneId: domain.zoneId,
         adopt: domain.adopt,
-        dev: props.dev,
         ...normalizeApiOptions(api),
       });
     }),
@@ -1288,9 +1233,8 @@ async function provisionRoutes(
   api: CloudflareApi,
   props: {
     scriptName: string;
-    adopt: boolean | undefined;
-    routes: WorkerProps["routes"] | undefined;
-    dev: boolean | undefined;
+    adopt?: boolean;
+    routes?: WorkerProps["routes"];
   },
 ): Promise<Route[] | undefined> {
   if (!props.routes?.length) {
@@ -1331,7 +1275,6 @@ async function provisionSubdomain(
     previewVersionId: string | undefined;
     retain: boolean;
     forceDelete: boolean;
-    dev: boolean | undefined;
   },
 ): Promise<WorkerSubdomain | undefined> {
   if (props.enable) {
@@ -1339,131 +1282,12 @@ async function provisionSubdomain(
       scriptName: props.scriptName,
       previewVersionId: props.previewVersionId,
       retain: props.retain,
-      dev: props.dev,
       ...normalizeApiOptions(api),
     });
   }
   if (props.forceDelete) {
     await disableWorkerSubdomain(api, props.scriptName);
   }
-}
-
-async function createDevCommand(props: {
-  id: string;
-  command: string;
-  cwd: string;
-  env: Record<string, string | undefined>;
-}) {
-  const persistFile = path.join(process.cwd(), ".alchemy", `${props.id}.pid`);
-  if (await exists(persistFile)) {
-    const pid = Number.parseInt(await fs.readFile(persistFile, "utf8"));
-    try {
-      // Actually kill the process if it's alive
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // ignore
-    }
-    try {
-      await fs.unlink(persistFile);
-    } catch {
-      // ignore
-    }
-  }
-  const command = props.command.split(" ");
-  const [cmd, ...args] = command;
-
-  const promise = new DeferredPromise<string>();
-  const childProcess = spawn(cmd, args, {
-    cwd: props.cwd,
-    shell: true,
-    env: {
-      ...process.env,
-      ...props.env,
-      ALCHEMY_CLOUDFLARE_PERSIST_PATH: path.join(
-        process.cwd(),
-        ".alchemy",
-        "miniflare",
-      ),
-      // Force colors in the child process since we're piping output
-      // FORCE_COLOR: "1",
-    },
-    stdio: ["inherit", "pipe", "pipe"],
-  });
-
-  // Clean up the pid file when the process exits
-  childProcess.once("exit", async () => {
-    try {
-      await fs.unlink(persistFile);
-    } catch {
-      // ignore
-    }
-  });
-
-  let urlFound = false;
-  let stdout = "";
-  let stderr = "";
-  const urlRegex =
-    /http:\/\/(?:(?:localhost|0\.0\.0\.0|127\.0\.0\.1)|(?:\d{1,3}\.){3}\d{1,3}):\d+(?:\/)?/;
-
-  const parseOutput = (data: string) => {
-    if (!urlFound) {
-      const match = data.match(urlRegex);
-      if (match) {
-        urlFound = true;
-        promise.resolve(match[0]);
-      }
-    }
-  };
-
-  // Handle stdout - parse for URL and write through with colors preserved
-  childProcess.stdout?.on("data", (data) => {
-    parseOutput(
-      (stdout += data.toString().replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")),
-    );
-    process.stdout.write(data);
-  });
-
-  childProcess.stderr?.on("data", (data) => {
-    parseOutput(
-      (stderr += data.toString().replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")),
-    );
-    process.stderr.write(data);
-  });
-
-  childProcess.on("error", (error) => {
-    promise.reject(error);
-  });
-  if (childProcess.pid) {
-    await fs.mkdir(path.dirname(persistFile), { recursive: true });
-    await fs.writeFile(persistFile, childProcess.pid.toString());
-  }
-  return {
-    url: await promise.value,
-    cleanup: async () => {
-      try {
-        await fs.unlink(persistFile);
-      } catch {
-        // ignore
-      }
-      if (!childProcess.killed) {
-        childProcess.kill("SIGTERM");
-        // Give it time to exit gracefully
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => {
-            if (!childProcess.killed) {
-              childProcess.kill("SIGKILL");
-            }
-            resolve();
-          }, 5000);
-
-          childProcess.once("exit", () => {
-            clearTimeout(timeout);
-            resolve();
-          });
-        });
-      }
-    },
-  };
 }
 
 type PutWorkerOptions = Omit<WorkerProps, "entrypoint"> & {
