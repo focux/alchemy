@@ -157,15 +157,26 @@ export const QueueConsumer = Resource(
     _id: string,
     props: QueueConsumerProps,
   ): Promise<QueueConsumer> {
-    const api = await createCloudflareApi(props);
-
     // Get queueId from either props.queue or props.queueId
     const queueId =
       typeof props.queue === "string" ? props.queue : props.queue.id;
-
     if (!queueId) {
       throw new Error("Either queue or queueId must be provided");
     }
+
+    if (this.scope.local && props.dev) {
+      return this({
+        id: this.output?.id ?? "noop-queue-consumer",
+        queueId,
+        queue: props.queue,
+        type: "worker",
+        scriptName: props.scriptName,
+        settings: props.settings,
+        accountId: this.output?.accountId ?? "",
+      });
+    }
+
+    const api = await createCloudflareApi(props);
 
     if (this.phase === "delete") {
       logger.log(`Deleting Queue Consumer for queue ${queueId}`);
@@ -178,17 +189,6 @@ export const QueueConsumer = Resource(
       return this.destroy();
     }
 
-    if (this.scope.local && props.dev) {
-      return this({
-        id: this.output?.id ?? "noop-queue-consumer",
-        queueId,
-        queue: props.queue,
-        type: "worker",
-        scriptName: props.scriptName,
-        settings: props.settings,
-        accountId: api.accountId,
-      });
-    }
     let consumerData: CloudflareQueueConsumerResponse;
 
     if (this.phase === "create" || this.output?.id === undefined) {

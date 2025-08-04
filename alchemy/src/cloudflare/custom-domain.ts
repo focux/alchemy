@@ -123,14 +123,6 @@ export const CustomDomain = Resource(
     logicalId: string, // Changed param name from id to logicalId for clarity
     props: CustomDomainProps,
   ): Promise<CustomDomain> {
-    // Create Cloudflare API client with automatic account discovery
-    const api = await createCloudflareApi(props);
-
-    if (this.phase === "delete") {
-      await deleteCustomDomain(this, api, logicalId, props);
-      return this.destroy();
-    }
-
     if (this.scope.local && props.dev) {
       const now = Date.now();
       return this({
@@ -141,6 +133,14 @@ export const CustomDomain = Resource(
         createdAt: this.output?.createdAt ?? now,
         updatedAt: now,
       });
+    }
+
+    // Create Cloudflare API client with automatic account discovery
+    const api = await createCloudflareApi(props);
+
+    if (this.phase === "delete") {
+      await deleteCustomDomain(this, api, logicalId, props);
+      return this.destroy();
     }
 
     // Create or Update phase

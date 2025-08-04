@@ -504,6 +504,13 @@ export const ContainerApplication = Resource(
     _id: string,
     props: ContainerApplicationProps,
   ): Promise<ContainerApplication> {
+    if (this.scope.local && props.dev) {
+      return this({
+        id: this.output?.id ?? "",
+        name: props.name,
+      });
+    }
+
     const api = await createCloudflareApi(props);
     if (this.phase === "delete") {
       if (this.output?.id) {
@@ -513,12 +520,6 @@ export const ContainerApplication = Resource(
       return this.destroy();
     }
 
-    if (this.scope.local && props.dev) {
-      return this({
-        id: this.output?.id ?? "noop-container-app",
-        name: props.name,
-      });
-    }
     // Prefer the immutable repo digest if present. Falls back to the tag reference.
     const imageReference = props.image.repoDigest ?? props.image.imageRef;
 

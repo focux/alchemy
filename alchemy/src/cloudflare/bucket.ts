@@ -245,13 +245,29 @@ const _R2Bucket = Resource(
     id: string,
     props: BucketProps = {},
   ): Promise<R2Bucket> {
-    const api = await createCloudflareApi(props);
     const bucketName = props.name || id;
     const allowPublicAccess = props.allowPublicAccess === true;
     const dev = {
       id: this.output?.dev?.id ?? bucketName,
       remote: props.dev?.remote ?? false,
     };
+
+    if (this.scope.local && !props.dev?.remote) {
+      return this({
+        name: this.output?.name ?? "",
+        location: this.output?.location ?? "",
+        creationDate: this.output?.creationDate ?? new Date(),
+        jurisdiction: this.output?.jurisdiction ?? "default",
+        allowPublicAccess,
+        domain: this.output?.domain,
+        type: "r2_bucket",
+        accountId: this.output?.accountId ?? "",
+        cors: props.cors,
+        dev,
+      });
+    }
+
+    const api = await createCloudflareApi(props);
 
     if (this.phase === "delete") {
       if (props.delete !== false) {
@@ -261,21 +277,6 @@ const _R2Bucket = Resource(
         await deleteBucket(api, bucketName, props);
       }
       return this.destroy();
-    }
-
-    if (this.scope.local && !props.dev?.remote) {
-      return this({
-        name: this.output?.name ?? "",
-        location: this.output?.location ?? "",
-        creationDate: this.output?.creationDate ?? new Date(),
-        jurisdiction: this.output?.jurisdiction ?? "default",
-        allowPublicAccess: this.output?.allowPublicAccess ?? false,
-        domain: this.output?.domain,
-        type: "r2_bucket",
-        accountId: api.accountId,
-        cors: props.cors,
-        dev,
-      });
     }
 
     if (this.phase === "create" || !this.output?.name) {

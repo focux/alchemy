@@ -262,12 +262,34 @@ const _D1Database = Resource(
     id: string,
     props: D1DatabaseProps = {},
   ): Promise<D1Database> {
-    const api = await createCloudflareApi(props);
     const databaseName = props.name ?? id;
+    const local = this.scope.local && !props.dev?.remote;
     const dev = {
       id: this.output?.dev?.id ?? this.output?.id ?? id,
       remote: props.dev?.remote ?? false,
     };
+
+    if (local) {
+      if (props.migrationsFiles && props.migrationsFiles.length > 0) {
+        await applyLocalD1Migrations({
+          databaseId: this.output?.id ?? id,
+          migrationsTable: props.migrationsTable ?? DEFAULT_MIGRATIONS_TABLE,
+          migrations: props.migrationsFiles,
+        });
+      }
+      return this({
+        type: "d1",
+        id: this.output?.id ?? "",
+        name: databaseName,
+        readReplication: props.readReplication,
+        primaryLocationHint: props.primaryLocationHint,
+        migrationsDir: props.migrationsDir,
+        migrationsTable: props.migrationsTable ?? DEFAULT_MIGRATIONS_TABLE,
+        dev,
+      });
+    }
+
+    const api = await createCloudflareApi(props);
 
     if (this.phase === "delete") {
       if (props.delete !== false && this.output?.id) {
@@ -278,27 +300,7 @@ const _D1Database = Resource(
     }
     let dbData: CloudflareD1Response;
 
-    if (this.scope.local && !props.dev?.remote) {
-      if (props.migrationsFiles && props.migrationsFiles.length > 0) {
-        await applyLocalD1Migrations({
-          databaseId: this.output?.id ?? id,
-          migrationsTable: props.migrationsTable ?? DEFAULT_MIGRATIONS_TABLE,
-          migrations: props.migrationsFiles,
-        });
-      }
-      return this({
-        type: "d1",
-        // we may not have an ID yet if we're creating a new database locally first
-        // so set it to the resource ID which we can later use to detect that a DB needs to be created during an `update`
-        id: this.output?.id ?? "",
-        name: databaseName,
-        readReplication: props.readReplication,
-        primaryLocationHint: props.primaryLocationHint,
-        migrationsDir: props.migrationsDir,
-        migrationsTable: props.migrationsTable ?? DEFAULT_MIGRATIONS_TABLE,
-        dev,
-      });
-    } else if (
+    if (
       this.phase === "create" ||
       // this is true IFF the database was created locally before any live deployment
       // in that case, we should still go through the create flow for "update"

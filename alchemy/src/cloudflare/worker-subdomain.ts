@@ -50,17 +50,18 @@ export const WorkerSubdomain = Resource(
     id: string,
     props: WorkerSubdomainProps,
   ) {
+    if (this.scope.local && props.dev) {
+      return this({
+        url: this.output?.url ?? "https://unavailable.alchemy.run",
+      });
+    }
+
     const api = await createCloudflareApi(props);
     if (this.phase === "delete") {
       if (!props.retain) {
         await disableWorkerSubdomain(api, props.scriptName);
       }
       return this.destroy();
-    }
-    if (this.scope.local && props.dev) {
-      return this({
-        url: this.output?.url ?? "https://unavailable.alchemy.run",
-      });
     }
     await enableWorkerSubdomain(api, props.scriptName);
     const subdomain = await getAccountSubdomain(api);

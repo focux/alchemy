@@ -209,16 +209,7 @@ const _KVNamespace = Resource(
     id: string,
     props: KVNamespaceProps,
   ): Promise<KVNamespace> {
-    const api = await createCloudflareApi(props);
     const title = props.title ?? id;
-
-    if (this.phase === "delete") {
-      if (this.output.namespaceId && props.delete !== false) {
-        await deleteKVNamespace(api, this.output.namespaceId);
-      }
-      return this.destroy();
-    }
-
     const local = this.scope.local && !props.dev?.remote;
     const dev = {
       id: this.output?.dev?.id ?? this.output?.namespaceId ?? id,
@@ -235,6 +226,15 @@ const _KVNamespace = Resource(
         createdAt: this.output?.createdAt ?? Date.now(),
         modifiedAt: Date.now(),
       });
+    }
+
+    const api = await createCloudflareApi(props);
+
+    if (this.phase === "delete") {
+      if (this.output.namespaceId && props.delete !== false) {
+        await deleteKVNamespace(api, this.output.namespaceId);
+      }
+      return this.destroy();
     }
 
     let result: { namespaceId: string; createdAt: number };

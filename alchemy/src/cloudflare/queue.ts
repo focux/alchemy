@@ -249,23 +249,11 @@ const _Queue = Resource("cloudflare::Queue", async function <
 >(this: Context<Queue<T>>, id: string, props: QueueProps = {}): Promise<
   Queue<T>
 > {
-  const api = await createCloudflareApi(props);
   const queueName = props.name ?? id;
   const dev = {
     id: this.output?.dev?.id ?? this.output?.id ?? id,
     remote: props.dev?.remote ?? false,
   };
-
-  if (this.phase === "delete") {
-    if (props.delete !== false && this.output?.id) {
-      // Delete Queue
-      await deleteQueue(api, this.output.id);
-    }
-
-    // Return void (a deleted queue has no content)
-    return this.destroy();
-  }
-
   if (this.scope.local && !props.dev?.remote) {
     return this({
       type: "queue",
@@ -277,6 +265,18 @@ const _Queue = Resource("cloudflare::Queue", async function <
       Body: undefined as T,
       Batch: undefined! as MessageBatch<T>,
     });
+  }
+
+  const api = await createCloudflareApi(props);
+
+  if (this.phase === "delete") {
+    if (props.delete !== false && this.output?.id) {
+      // Delete Queue
+      await deleteQueue(api, this.output.id);
+    }
+
+    // Return void (a deleted queue has no content)
+    return this.destroy();
   }
 
   let queueData: CloudflareQueueResponse;
