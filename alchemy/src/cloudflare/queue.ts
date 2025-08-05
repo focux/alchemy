@@ -231,10 +231,10 @@ export interface Queue<Body = unknown>
  *
  * @see https://developers.cloudflare.com/queues/
  */
-export async function Queue(
+export async function Queue<T = unknown>(
   id: string,
   props: QueueProps = {},
-): Promise<Queue> {
+): Promise<Queue<T>> {
   return await _Queue(id, {
     ...props,
     dev: {
