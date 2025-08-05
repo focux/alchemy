@@ -160,13 +160,10 @@ export const QueueConsumer = Resource(
     // Get queueId from either props.queue or props.queueId
     const queueId =
       typeof props.queue === "string" ? props.queue : props.queue.id;
-    if (!queueId) {
-      throw new Error("Either queue or queueId must be provided");
-    }
 
     if (this.scope.local && props.dev) {
       return this({
-        id: this.output?.id ?? "noop-queue-consumer",
+        id: this.output?.id ?? "",
         queueId,
         queue: props.queue,
         type: "worker",
@@ -174,6 +171,10 @@ export const QueueConsumer = Resource(
         settings: props.settings,
         accountId: this.output?.accountId ?? "",
       });
+    }
+
+    if (!queueId) {
+      throw new Error("Either queue or queueId must be provided");
     }
 
     const api = await createCloudflareApi(props);
@@ -191,7 +192,7 @@ export const QueueConsumer = Resource(
 
     let consumerData: CloudflareQueueConsumerResponse;
 
-    if (this.phase === "create" || this.output?.id === undefined) {
+    if (this.phase === "create" || !this.output?.id) {
       try {
         consumerData = await createQueueConsumer(api, queueId, props);
       } catch (err) {
