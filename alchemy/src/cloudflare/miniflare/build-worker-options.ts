@@ -217,7 +217,7 @@ export const buildWorkerOptions = async (
         break;
       }
       case "pipeline": {
-        (options.pipelines ??= {})[key] = binding.id;
+        (options.pipelines ??= {})[key] = binding.name;
         break;
       }
       case "ratelimit": {
