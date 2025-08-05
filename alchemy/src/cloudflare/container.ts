@@ -535,7 +535,7 @@ export const ContainerApplication = Resource(
         },
       },
     };
-    if (this.phase === "update") {
+    if (this.phase === "update" && this.output?.id) {
       const application = await updateContainerApplication(
         api,
         this.output.id,
