@@ -656,10 +656,14 @@ function processBindings(
         new_classes.push(doBinding.className);
       }
     } else if (binding.type === "r2_bucket") {
+      const name =
+        "dev" in binding && !binding.dev?.remote
+          ? binding.dev.id
+          : binding.name;
       r2Buckets.push({
         binding: bindingName,
-        bucket_name: binding.name,
-        preview_bucket_name: binding.dev.remote ? binding.name : binding.dev.id,
+        bucket_name: name,
+        preview_bucket_name: name,
         ...(binding.dev?.remote ? { experimental_remote: true } : {}),
       });
     } else if (binding.type === "secret") {
@@ -678,18 +682,24 @@ function processBindings(
         script_name: binding.scriptName,
       });
     } else if (binding.type === "d1") {
+      const id =
+        "dev" in binding && !binding.dev?.remote ? binding.dev.id : binding.id;
       d1Databases.push({
         binding: bindingName,
-        database_id: binding.id,
+        database_id: id,
         database_name: binding.name,
         migrations_dir: binding.migrationsDir,
-        preview_database_id: binding.dev.remote ? binding.id : binding.dev.id,
+        preview_database_id: id,
         ...(binding.dev?.remote ? { experimental_remote: true } : {}),
       });
     } else if (binding.type === "queue") {
+      const name =
+        "dev" in binding && !binding.dev?.remote
+          ? binding.name
+          : binding.dev.id;
       queues.producers.push({
         binding: bindingName,
-        queue: binding.dev.remote ? binding.name : binding.dev.id,
+        queue: name,
       });
     } else if (binding.type === "vectorize") {
       vectorizeIndexes.push({
