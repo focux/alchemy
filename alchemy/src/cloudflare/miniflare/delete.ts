@@ -2,9 +2,9 @@ import crypto from "node:crypto";
 import type { RmDirOptions } from "node:fs";
 import fs from "node:fs/promises";
 import path from "pathe";
-import type { DurableObjectNamespace } from "../durable-object-namespace";
-import type { Workflow } from "../workflow";
-import { DEFAULT_PERSIST_PATH } from "./paths";
+import type { DurableObjectNamespace } from "../durable-object-namespace.ts";
+import type { Workflow } from "../workflow.ts";
+import { DEFAULT_PERSIST_PATH } from "./paths.ts";
 
 const PERSIST_ROOT = path.resolve(DEFAULT_PERSIST_PATH);
 const BINDING_TYPE_KEY = {
