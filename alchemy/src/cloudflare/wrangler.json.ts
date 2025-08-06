@@ -3,13 +3,22 @@ import path from "node:path";
 import type { Context } from "../context.ts";
 import { formatJson } from "../fs/static-json-file.ts";
 import { Resource } from "../resource.ts";
+import { isSecret } from "../secret.ts";
 import { assertNever } from "../util/assert-never.ts";
-import { Self, type Bindings } from "./bindings.ts";
+import {
+  Self,
+  type Bindings,
+  type WorkerBindingRateLimit,
+} from "./bindings.ts";
 import type { DurableObjectNamespace } from "./durable-object-namespace.ts";
 import type { EventSource } from "./event-source.ts";
 import { isQueueEventSource } from "./event-source.ts";
 import { isQueue } from "./queue.ts";
 import type { Worker, WorkerProps } from "./worker.ts";
+
+type WranglerJsonRateLimit = Omit<WorkerBindingRateLimit, "type"> & {
+  type: "rate_limit";
+};
 
 /**
  * Properties for wrangler.json configuration file
@@ -47,6 +56,13 @@ export interface WranglerJsonProps {
     binding: string;
     directory: string;
   };
+
+  /**
+   * Whether to include secrets in the wrangler.json file
+   *
+   * @default true
+   */
+  secrets?: boolean;
 
   /**
    * Transform hooks to modify generated configuration files
@@ -149,6 +165,8 @@ export const WranglerJson = Resource(
             binding: props.assets.binding,
           }
         : undefined,
+      placement: worker.placement,
+      limits: worker.limits,
     };
 
     // Process bindings if they exist
@@ -159,6 +177,7 @@ export const WranglerJson = Resource(
         worker.eventSources,
         worker.name,
         cwd,
+        props.secrets ?? false,
       );
     }
 
@@ -181,7 +200,24 @@ export const WranglerJson = Resource(
       : spec;
 
     await fs.mkdir(dirname, { recursive: true });
-    await fs.writeFile(filePath, await formatJson(finalSpec));
+    if (props.secrets) {
+      // If secrets are enabled, decrypt them in the wrangler.json file,
+      // but do not modify `finalSpec` so that way secrets aren't written to state unencrypted.
+      const withSecretsUnwrapped = {
+        ...finalSpec,
+        vars: {
+          ...finalSpec.vars,
+          ...Object.fromEntries(
+            Object.entries(finalSpec.vars ?? {}).map(([key, value]) =>
+              isSecret(value) ? [key, value.unencrypted] : [key, value],
+            ),
+          ),
+        },
+      };
+      await fs.writeFile(filePath, await formatJson(withSecretsUnwrapped));
+    } else {
+      await fs.writeFile(filePath, await formatJson(finalSpec));
+    }
 
     // Return the resource
     return this({
@@ -217,6 +253,20 @@ export interface WranglerJsonSpec {
    * A list of flags that enable features from upcoming Workers runtime
    */
   compatibility_flags?: string[];
+
+  /**
+   * The placement mode for the worker
+   */
+  placement?: {
+    mode: "smart";
+  };
+
+  /**
+   * The CPU time limit for the worker
+   */
+  limits?: {
+    cpu_ms?: number;
+  };
 
   /**
    * Whether to enable a workers.dev URL for this worker
@@ -431,6 +481,13 @@ export interface WranglerJsonSpec {
     namespace: string;
     experimental_remote?: boolean;
   }[];
+
+  /**
+   * Unsafe bindings section for experimental features
+   */
+  unsafe?: {
+    bindings: WranglerJsonRateLimit[];
+  };
 }
 
 /**
@@ -442,6 +499,7 @@ function processBindings(
   eventSources: EventSource[] | undefined,
   workerName: string,
   workerCwd: string,
+  writeSecrets: boolean,
 ): void {
   // Arrays to collect different binding types
   const kvNamespaces: {
@@ -518,6 +576,7 @@ function processBindings(
     namespace: string;
     experimental_remote?: boolean;
   }[] = [];
+  const unsafeBindings: WranglerJsonRateLimit[] = [];
   const containers: {
     class_name: string;
   }[] = [];
@@ -525,7 +584,7 @@ function processBindings(
   for (const eventSource of eventSources ?? []) {
     if (isQueueEventSource(eventSource)) {
       queues.consumers.push({
-        queue: eventSource.queue.id,
+        queue: eventSource.queue.name,
         max_batch_size: eventSource.settings?.batchSize,
         max_concurrency: eventSource.settings?.maxConcurrency,
         max_retries: eventSource.settings?.maxRetries,
@@ -534,7 +593,7 @@ function processBindings(
       });
     } else if (isQueue(eventSource)) {
       queues.consumers.push({
-        queue: eventSource.id,
+        queue: eventSource.name,
       });
     }
   }
@@ -546,10 +605,11 @@ function processBindings(
     }
     if (typeof binding === "string") {
       // Plain text binding - add to vars
-      if (!spec.vars) {
-        spec.vars = {};
-      }
+      spec.vars ??= {};
       spec.vars[bindingName] = binding;
+    } else if (writeSecrets && isSecret(binding)) {
+      spec.vars ??= {};
+      spec.vars[bindingName] = binding as any;
     } else if (binding === Self) {
       // Self(service) binding
       services.push({
@@ -705,6 +765,13 @@ function processBindings(
         namespace: binding.namespaceName,
         experimental_remote: true,
       });
+    } else if (binding.type === "ratelimit") {
+      unsafeBindings.push({
+        name: bindingName,
+        type: "rate_limit",
+        namespace_id: binding.namespace_id.toString(),
+        simple: binding.simple,
+      });
     } else if (binding.type === "secret_key") {
       // no-op
     } else if (binding.type === "container") {
@@ -785,5 +852,11 @@ function processBindings(
 
   if (dispatchNamespaces.length > 0) {
     spec.dispatch_namespaces = dispatchNamespaces;
+  }
+
+  if (unsafeBindings.length > 0) {
+    spec.unsafe = {
+      bindings: unsafeBindings,
+    };
   }
 }

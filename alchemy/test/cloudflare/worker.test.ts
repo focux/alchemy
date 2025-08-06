@@ -9,11 +9,8 @@ import { Self } from "../../src/cloudflare/bindings.ts";
 import { DurableObjectNamespace } from "../../src/cloudflare/durable-object-namespace.ts";
 import { KVNamespace } from "../../src/cloudflare/kv-namespace.ts";
 import type { SingleStepMigration } from "../../src/cloudflare/worker-migration.ts";
-import {
-  deleteWorker,
-  Worker,
-  WorkerRef,
-} from "../../src/cloudflare/worker.ts";
+import { WorkerRef } from "../../src/cloudflare/worker-ref.ts";
+import { deleteWorker, Worker } from "../../src/cloudflare/worker.ts";
 import { destroy } from "../../src/destroy.ts";
 import { BRANCH_PREFIX } from "../util.ts";
 import {
@@ -2102,6 +2099,104 @@ describe("Worker Resource", () => {
       );
     } finally {
       // await destroy(scope);
+    }
+  });
+
+  test("create worker with smart placement", async (scope) => {
+    const workerName = `${BRANCH_PREFIX}-test-worker-placement`;
+
+    let worker: Worker | undefined;
+    try {
+      // Create a worker with smart placement
+      worker = await Worker(workerName, {
+        name: workerName,
+        adopt: true,
+        script: `
+          export default {
+            async fetch(request, env, ctx) {
+              return new Response('Hello smart placement!', { status: 200 });
+            }
+          };
+        `,
+        placement: {
+          mode: "smart",
+        },
+      });
+
+      // Verify the worker was created successfully
+      expect(worker.id).toBeTruthy();
+      expect(worker.name).toEqual(workerName);
+      expect(worker.placement).toEqual({
+        mode: "smart",
+      });
+
+      // Update the worker to disable smart placement by omitting placement
+      worker = await Worker(workerName, {
+        name: workerName,
+        adopt: true,
+        script: `
+          export default {
+            async fetch(request, env, ctx) {
+              return new Response('Hello placement disabled!', { status: 200 });
+            }
+          };
+        `,
+        // No placement property means smart placement is disabled
+      });
+
+      // Verify the placement was disabled (undefined)
+      expect(worker.placement).toBeUndefined();
+    } finally {
+      await destroy(scope);
+      await assertWorkerDoesNotExist(api, workerName);
+    }
+  });
+
+  test("create worker with cpu_ms limit", async (scope) => {
+    const workerName = `${BRANCH_PREFIX}-test-worker-cpu-ms`;
+
+    let worker: Worker | undefined;
+    try {
+      // Create a worker with smart placement
+      worker = await Worker(workerName, {
+        name: workerName,
+        adopt: true,
+        script: `
+          export default {
+            async fetch(request, env, ctx) {
+              return new Response('Hello smart placement!', { status: 200 });
+            }
+          };
+        `,
+        limits: {
+          cpu_ms: 300_000,
+        },
+      });
+
+      // Verify the worker was created successfully
+      expect(worker.limits).toEqual({
+        cpu_ms: 300_000,
+      });
+
+      // Update the worker to disable smart placement by omitting placement
+      worker = await Worker(workerName, {
+        name: workerName,
+        adopt: true,
+        script: `
+          export default {
+            async fetch(request, env, ctx) {
+              return new Response('Hello placement disabled!', { status: 200 });
+            }
+          };
+        `,
+        // No placement property means smart placement is disabled
+      });
+
+      // Verify the limits were disabled (undefined)
+      expect(worker.limits).toBeUndefined();
+    } finally {
+      await destroy(scope);
+      await assertWorkerDoesNotExist(api, workerName);
     }
   });
 });

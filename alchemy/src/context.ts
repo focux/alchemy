@@ -57,7 +57,7 @@ export interface BaseContext<Out extends Resource> {
    * Indicate that this resource is being replaced.
    * This will cause the resource to be deleted at the end of the stack's CREATE phase.
    */
-  replace(force?: boolean): Promise<never>;
+  replace(force?: boolean): never;
   /**
    * Terminate the resource lifecycle handler and destroy the resource.
    *
@@ -67,6 +67,17 @@ export interface BaseContext<Out extends Resource> {
    * "return undefined" so that `await MyResource()` always returns a value.
    */
   destroy(): never;
+  /**
+   * Register a cleanup function that will be called when the process exits.
+   *
+   * @example
+   * const proc = spawn('my-command', ['arg1', 'arg2']);
+   * this.onCleanup(async () => {
+   *   proc.kill();
+   *   await waitForExit(proc);
+   * });
+   */
+  onCleanup(fn: () => void | Promise<void>): void;
   /**
    * Create the Resource envelope (with Alchemy + User properties)
    */
@@ -102,7 +113,7 @@ export function context<
   seq: number;
   props: Props;
   state: State<Kind, Props, Out>;
-  replace: (force?: boolean) => Promise<never>;
+  replace: (force?: boolean) => never;
   isReplacement?: boolean;
 }): Context<Out> {
   type InternalSymbols =
@@ -152,6 +163,14 @@ export function context<
     quiet: scope.quiet,
     destroy: () => {
       throw new DestroyedSignal();
+    },
+    onCleanup: (fn: () => void | Promise<void>) => {
+      // make the function idempotent so repeated calls don't cause the process to hang
+      let promise: Promise<void> | undefined;
+      scope.root.onCleanup(async () => {
+        promise ??= Promise.resolve(fn());
+        await promise;
+      });
     },
     create,
   }) as unknown as Context<Out>;
