@@ -14,32 +14,29 @@ export const onRequest = defineRouteMiddleware((context) => {
   }
 
   // Base OG image URL
-  const baseImageUrl = `/og/${route.id ?? "index"}.png`;
+  const baseImageUrl = new URL(`/og/${route.id || "index"}.png`, context.url);
 
-  // Open Graph image (Facebook, LinkedIn, WhatsApp) - 1200x630
-  route.head.push({
-    tag: "meta",
-    attrs: {
-      property: "og:image",
-      content: `${baseImageUrl}`,
-    },
-  });
+  const meta = {
+    "og:url": context.url.toString(),
+    "og:title": route.entry.data.title,
+    "og:description": route.entry.data.description,
+    "og:image": baseImageUrl.toString(),
+    "twitter:card": "summary_large_image",
+    "twitter:image": baseImageUrl.toString(),
+    "twitter:title": route.entry.data.title,
+    "twitter:description": route.entry.data.description,
+    "twitter:domain": context.url.hostname,
+  };
 
-  // Twitter Card
-  route.head.push({
-    tag: "meta",
-    attrs: {
-      name: "twitter:card",
-      content: "summary_large_image",
-    },
-  });
+  for (const [key, value] of Object.entries(meta)) {
+    if (!value) continue;
 
-  // Twitter image
-  route.head.push({
-    tag: "meta",
-    attrs: {
-      name: "twitter:image",
-      content: `${baseImageUrl}`,
-    },
-  });
+    route.head.push({
+      tag: "meta",
+      attrs: {
+        property: key,
+        content: value,
+      },
+    });
+  }
 });
