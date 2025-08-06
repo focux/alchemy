@@ -172,8 +172,7 @@ async function getFilesRecursively(
       }
       if (
         file.isDirectory() ||
-        (file.isSymbolicLink() &&
-          (await fs.stat(filePath).then((stats) => stats.isDirectory())))
+        (file.isSymbolicLink() && (await fs.stat(filePath)).isDirectory())
       ) {
         result.push(...(await getFilesRecursively(filePath, ignoreMatcher)));
       } else {
