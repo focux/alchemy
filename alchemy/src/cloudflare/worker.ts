@@ -32,6 +32,7 @@ import {
   isDurableObjectNamespace,
 } from "./durable-object-namespace.ts";
 import { type EventSource, isQueueEventSource } from "./event-source.ts";
+import { deleteMiniflareWorkerData } from "./miniflare/delete.ts";
 import {
   QueueConsumer,
   deleteQueueConsumer,
@@ -740,6 +741,7 @@ const _Worker = Resource(
       let assets: Assets | undefined;
       const containers: Container[] = [];
       const workflows: Workflow[] = [];
+      const durableObjects: DurableObjectNamespace[] = [];
       for (const binding of Object.values(props.bindings ?? {})) {
         if (typeof binding !== "object") continue;
 
@@ -752,6 +754,11 @@ const _Worker = Resource(
           (!binding.scriptName || binding.scriptName === name)
         ) {
           workflows.push(binding);
+        } else if (
+          binding.type === "durable_object_namespace" &&
+          (!binding.scriptName || binding.scriptName === name)
+        ) {
+          durableObjects.push(binding);
         }
       }
 
@@ -765,12 +772,17 @@ const _Worker = Resource(
         assets,
         containers,
         workflows,
+        durableObjects,
       };
     })();
     if (this.phase === "delete") {
       if (options.bundle.isOk()) {
         await options.bundle.value.delete?.();
       }
+      await deleteMiniflareWorkerData(options.name, {
+        durableObjects: options.durableObjects,
+        workflows: options.workflows,
+      });
       if (!props.version && this.output?.hasRemote !== false) {
         const api = await createCloudflareApi(props);
         await deleteQueueConsumers(api, options.name);

@@ -11,6 +11,7 @@ import {
 import { cloneD1Database } from "./d1-clone.ts";
 import { applyLocalD1Migrations } from "./d1-local-migrations.ts";
 import { applyMigrations, listMigrationsFiles } from "./d1-migrations.ts";
+import { deleteMiniflareBinding } from "./miniflare/delete.ts";
 
 const DEFAULT_MIGRATIONS_TABLE = "d1_migrations";
 
@@ -292,6 +293,9 @@ const _D1Database = Resource(
     const api = await createCloudflareApi(props);
 
     if (this.phase === "delete") {
+      if (this.output.dev.id) {
+        await deleteMiniflareBinding("d1", this.output.dev.id);
+      }
       if (props.delete !== false && this.output?.id) {
         await deleteDatabase(api, this.output.id);
       }

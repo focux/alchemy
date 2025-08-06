@@ -173,10 +173,6 @@ export const QueueConsumer = Resource(
       });
     }
 
-    if (!queueId) {
-      throw new Error("Either queue or queueId must be provided");
-    }
-
     const api = await createCloudflareApi(props);
 
     if (this.phase === "delete") {
@@ -188,6 +184,10 @@ export const QueueConsumer = Resource(
 
       // Return void (a deleted consumer has no content)
       return this.destroy();
+    }
+
+    if (!queueId) {
+      throw new Error("Either queue or queueId must be provided");
     }
 
     let consumerData: CloudflareQueueConsumerResponse;

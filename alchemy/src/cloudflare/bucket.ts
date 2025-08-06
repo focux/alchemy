@@ -13,6 +13,7 @@ import {
   type CloudflareApi,
   type CloudflareApiOptions,
 } from "./api.ts";
+import { deleteMiniflareBinding } from "./miniflare/delete.ts";
 
 /**
  * Properties for creating or updating an R2 Bucket
@@ -271,6 +272,9 @@ const _R2Bucket = Resource(
 
     if (this.phase === "delete") {
       if (props.delete !== false) {
+        if (this.output.dev.id) {
+          await deleteMiniflareBinding("r2", this.output.dev.id);
+        }
         if (props.empty) {
           await emptyBucket(api, bucketName, props);
         }
