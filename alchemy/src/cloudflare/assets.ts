@@ -170,16 +170,12 @@ async function getFilesRecursively(
       if (ignoreMatcher.ignores(file.name)) {
         return;
       }
-      if (file.isDirectory()) {
+      if (
+        file.isDirectory() ||
+        (file.isSymbolicLink() &&
+          (await fs.stat(filePath).then((stats) => stats.isDirectory())))
+      ) {
         result.push(...(await getFilesRecursively(filePath, ignoreMatcher)));
-      } else if (file.isSymbolicLink()) {
-        // For symlinks, we need to stat the target to see if it's a directory
-        const stats = await fs.stat(filePath);
-        if (stats.isDirectory()) {
-          result.push(...(await getFilesRecursively(filePath, ignoreMatcher)));
-        } else {
-          result.push(filePath);
-        }
       } else {
         result.push(filePath);
       }
