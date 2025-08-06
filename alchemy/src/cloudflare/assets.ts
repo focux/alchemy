@@ -166,14 +166,22 @@ async function getFilesRecursively(
 
   await Promise.all(
     files.map(async (file) => {
-      const path = `${dir}/${file.name}`;
+      const filePath = path.join(dir, file.name);
       if (ignoreMatcher.ignores(file.name)) {
         return;
       }
       if (file.isDirectory()) {
-        result.push(...(await getFilesRecursively(path, ignoreMatcher)));
+        result.push(...(await getFilesRecursively(filePath, ignoreMatcher)));
+      } else if (file.isSymbolicLink()) {
+        // For symlinks, we need to stat the target to see if it's a directory
+        const stats = await fs.stat(filePath);
+        if (stats.isDirectory()) {
+          result.push(...(await getFilesRecursively(filePath, ignoreMatcher)));
+        } else {
+          result.push(filePath);
+        }
       } else {
-        result.push(path);
+        result.push(filePath);
       }
     }),
   );
