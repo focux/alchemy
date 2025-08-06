@@ -456,8 +456,8 @@ describe("WranglerJson Resource", () => {
         expect(spec.kv_namespaces).toHaveLength(1);
         expect(spec.kv_namespaces?.[0]).toMatchObject({
           binding: "KV",
-          id: kvNamespace.dev.id,
-          preview_id: kvNamespace.dev.id,
+          id: kvNamespace.namespaceId,
+          preview_id: kvNamespace.namespaceId,
         });
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
@@ -494,9 +494,9 @@ describe("WranglerJson Resource", () => {
         expect(spec.d1_databases).toHaveLength(1);
         expect(spec.d1_databases?.[0]).toMatchObject({
           binding: "DB",
-          database_id: d1Database.dev.id,
+          database_id: d1Database.id,
           database_name: d1Database.name,
-          preview_database_id: d1Database.dev.id,
+          preview_database_id: d1Database.id,
         });
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true });

@@ -178,6 +178,7 @@ export const WranglerJson = Resource(
         worker.name,
         cwd,
         props.secrets ?? false,
+        this.scope.local && !props.worker.dev?.remote,
       );
     }
 
@@ -500,6 +501,7 @@ function processBindings(
   workerName: string,
   workerCwd: string,
   writeSecrets: boolean,
+  local: boolean,
 ): void {
   // Arrays to collect different binding types
   const kvNamespaces: {
@@ -625,7 +627,7 @@ function processBindings(
     } else if (binding.type === "kv_namespace") {
       // KV Namespace binding
       const id =
-        "dev" in binding && !binding.dev?.remote
+        "dev" in binding && !binding.dev?.remote && local
           ? binding.dev.id
           : "namespaceId" in binding
             ? binding.namespaceId
@@ -657,7 +659,7 @@ function processBindings(
       }
     } else if (binding.type === "r2_bucket") {
       const name =
-        "dev" in binding && !binding.dev?.remote
+        "dev" in binding && !binding.dev?.remote && local
           ? binding.dev.id
           : binding.name;
       r2Buckets.push({
@@ -683,7 +685,9 @@ function processBindings(
       });
     } else if (binding.type === "d1") {
       const id =
-        "dev" in binding && !binding.dev?.remote ? binding.dev.id : binding.id;
+        "dev" in binding && !binding.dev?.remote && local
+          ? binding.dev.id
+          : binding.id;
       d1Databases.push({
         binding: bindingName,
         database_id: id,
@@ -693,13 +697,13 @@ function processBindings(
         ...(binding.dev?.remote ? { experimental_remote: true } : {}),
       });
     } else if (binding.type === "queue") {
-      const name =
-        "dev" in binding && !binding.dev?.remote
-          ? binding.name
-          : binding.dev.id;
+      const id =
+        "dev" in binding && !binding.dev?.remote && local
+          ? binding.dev.id
+          : binding.id;
       queues.producers.push({
         binding: bindingName,
-        queue: name,
+        queue: id,
       });
     } else if (binding.type === "vectorize") {
       vectorizeIndexes.push({
