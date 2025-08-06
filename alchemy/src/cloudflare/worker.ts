@@ -5,7 +5,6 @@ import { Resource, ResourceKind } from "../resource.ts";
 import type { type } from "../type.ts";
 import { DeferredPromise } from "../util/deferred-promise.ts";
 import { logger } from "../util/logger.ts";
-import { memoize } from "../util/memoize.ts";
 import { withExponentialBackoff } from "../util/retry.ts";
 import { CloudflareApiError, handleApiError } from "./api-error.ts";
 import {
@@ -47,6 +46,7 @@ import {
   normalizeWorkerBundle,
 } from "./worker-bundle.ts";
 import {
+  type WorkerScriptMetadata,
   bumpMigrationTagVersion,
   prepareWorkerMetadata,
 } from "./worker-metadata.ts";
@@ -836,52 +836,54 @@ const _Worker = Resource(
     }
 
     const api = await createCloudflareApi(props);
-    const create =
-      this.phase === "create" ||
-      (this.output.hasRemote === undefined
-        ? await workerExists(api, options)
-        : false);
 
-    if (create) {
-      if (props.version && !(await workerExists(api, options))) {
-        await putWorker(api, {
-          ...props,
-          version: undefined,
-          workerName: options.name,
-          scriptBundle: await bundle.create(),
-          dispatchNamespace: options.dispatchNamespace,
-          compatibilityDate: options.compatibilityDate,
-          compatibilityFlags: options.compatibilityFlags,
-          assetUploadResult: options.assets
-            ? await uploadAssets(api, {
-                workerName: options.name,
-                assets: options.assets,
-                assetConfig: props.assets,
-                namespace: options.dispatchNamespace,
-              })
-            : undefined,
-        });
-      } else if (!props.adopt && (await workerExists(api, options))) {
-        throw new Error(
-          `Worker with name '${options.name}' already exists. Please use a unique name or use the 'adopt' option to use the existing worker.`,
-        );
+    if (this.phase === "create" || this.output.hasRemote === false) {
+      if (props.version) {
+        // When version is specified, we adopt existing workers or create them if they don't exist
+        if (!(await workerExists(api, options))) {
+          // Create the base worker first if it doesn't exist
+          await putWorker(api, {
+            ...props,
+            version: undefined,
+            workerName: options.name,
+            scriptBundle: await bundle.create(),
+            dispatchNamespace: options.dispatchNamespace,
+            compatibilityDate: options.compatibilityDate,
+            compatibilityFlags: options.compatibilityFlags,
+            assetUploadResult: options.assets
+              ? await uploadAssets(api, {
+                  workerName: options.name,
+                  assets: options.assets,
+                  assetConfig: props.assets,
+                  namespace: options.dispatchNamespace,
+                })
+              : undefined,
+          });
+        }
+        // We always "adopt" when publishing versions
+      } else if (!props.adopt) {
+        await assertWorkerDoesNotExist(api, options.name);
       } else if (
         props.adopt &&
         !options.dispatchNamespace &&
         props.url === false
       ) {
+        // explicitly disable the workers.dev subdomain
         await disableWorkerSubdomain(api, options.name);
       }
-    } else {
-      const oldName = this.output?.name ?? this.output?.id;
-      if (oldName !== options.name) {
+    } else if (this.phase === "update") {
+      const oldName = this.output.name ?? this.output.id;
+      const newName = options.name;
+
+      if (oldName && oldName !== newName) {
         if (options.dispatchNamespace) {
           this.replace(true);
         } else {
           const renameResponse = await api.patch(
             `/accounts/${api.accountId}/workers/services/${oldName}`,
-            { id: options.name },
+            { id: newName },
           );
+
           if (!renameResponse.ok) {
             await handleApiError(renameResponse, "rename", "worker", oldName);
           }
@@ -1043,69 +1045,140 @@ async function provisionResources<B extends Bindings>(
         api: CloudflareApi;
       },
 ) {
-  const apiProps: CloudflareApiOptions = {
-    accountId: props.accountId,
-    apiKey: props.apiKey,
-    apiToken: props.apiToken,
-    email: props.email,
-    baseUrl: props.baseUrl,
-  };
   let metadataPromise: ReturnType<typeof getVersionMetadata> | undefined;
+
+  const input = {
+    containers: options.containers,
+    domains: props.domains?.map((domain) => {
+      if (typeof domain === "string") {
+        return {
+          name: domain,
+          zoneId: undefined,
+          adopt: props.adopt,
+        };
+      }
+      return {
+        name: domain.domainName,
+        zoneId: domain.zoneId,
+        adopt: domain.adopt ?? props.adopt,
+      };
+    }),
+    eventSources: props.eventSources?.map((eventSource) => {
+      if (isQueue(eventSource)) {
+        return {
+          queue: eventSource,
+          settings: eventSource.dlq
+            ? { deadLetterQueue: eventSource.dlq }
+            : undefined,
+        };
+      }
+      if (isQueueEventSource(eventSource)) {
+        return {
+          queue: eventSource.queue,
+          settings: eventSource.settings,
+        };
+      }
+      throw new Error(`Unsupported event source: ${eventSource}`);
+    }),
+    routes: props.routes?.map((route) => {
+      if (typeof route === "string") {
+        return {
+          pattern: route,
+          adopt: props.adopt,
+        };
+      }
+      return {
+        pattern: route.pattern,
+        zoneId: route.zoneId,
+        adopt: route.adopt ?? props.adopt,
+      };
+    }),
+    api: {
+      accountId: props.accountId,
+      apiKey: props.apiKey,
+      apiToken: props.apiToken,
+      email: props.email,
+      baseUrl: props.baseUrl,
+    } satisfies CloudflareApiOptions,
+  };
+
+  if (input.routes) {
+    assertUnique(input.routes, "pattern", "Route");
+  }
+  if (input.domains) {
+    assertUnique(input.domains, "name", "Custom Domain");
+  }
 
   const [containers, domains, eventSources, routes, subdomain] =
     await Promise.all([
-      options.containers?.map(async (container) => {
-        return await ContainerApplication(container.id, {
-          image: container.image,
-          name: container.name,
-          instanceType: container.instanceType,
-          observability: container.observability,
-          durableObjects: {
-            namespaceId: await getContainerNamespaceId(container),
-          },
-          schedulingPolicy: container.schedulingPolicy,
-          adopt: container.adopt,
-          dev: options.local,
-          ...apiProps,
-        });
-      }),
-      normalizeCustomDomains()?.map(async (domain) => {
-        return await CustomDomain(domain.name, {
-          name: domain.name,
-          zoneId: domain.zoneId,
-          adopt: domain.adopt,
-          workerName: options.name,
-          dev: options.local,
-          ...apiProps,
-        });
-      }),
-      normalizeEventSources()?.map(async (eventSource) => {
-        return await QueueConsumer(`${eventSource.queue.id}-consumer`, {
-          queue: eventSource.queue,
-          scriptName: options.name,
-          settings: eventSource.settings,
-          adopt: props.adopt,
-          dev: options.local,
-          ...apiProps,
-        });
-      }),
-      normalizeRoutes()?.map(async (route) => {
-        return await Route(route.pattern, {
-          pattern: route.pattern,
-          script: options.name,
-          zoneId: route.zoneId,
-          adopt: route.adopt,
-          dev: options.local,
-          ...apiProps,
-        });
-      }),
+      input.containers
+        ? Promise.all(
+            input.containers.map(async (container) => {
+              return await ContainerApplication(container.id, {
+                image: container.image,
+                name: container.name,
+                instanceType: container.instanceType,
+                observability: container.observability,
+                durableObjects: {
+                  namespaceId: await getContainerNamespaceId(container),
+                },
+                schedulingPolicy: container.schedulingPolicy,
+                adopt: container.adopt,
+                dev: options.local,
+                ...input.api,
+              });
+            }),
+          )
+        : undefined,
+      input.domains
+        ? Promise.all(
+            input.domains.map(async (domain) => {
+              return await CustomDomain(domain.name, {
+                name: domain.name,
+                zoneId: domain.zoneId,
+                adopt: domain.adopt,
+                workerName: options.name,
+                dev: options.local,
+                ...input.api,
+              });
+            }),
+          )
+        : undefined,
+      input.eventSources
+        ? Promise.all(
+            input.eventSources.map(async (eventSource) => {
+              return await QueueConsumer(`${eventSource.queue.id}-consumer`, {
+                queue: eventSource.queue,
+                scriptName: options.name,
+                settings: eventSource.settings,
+                adopt: props.adopt,
+                dev: options.local,
+                ...input.api,
+              });
+            }),
+          )
+        : undefined,
+      input.routes
+        ? Promise.all(
+            input.routes.map(async (route) => {
+              return await Route(route.pattern, {
+                pattern: route.pattern,
+                script: options.name,
+                zoneId: route.zoneId,
+                adopt: route.adopt,
+                dev: options.local,
+                ...input.api,
+              });
+            }),
+          )
+        : undefined,
       (props.url ?? !options.dispatchNamespace)
-        ? await WorkerSubdomain("url", {
+        ? WorkerSubdomain("url", {
             scriptName: options.name,
             previewVersionId: props.version ? options.result?.id : undefined,
             retain: !!props.version,
             dev: options.local,
-            ...apiProps,
+            ...input.api,
           })
         : undefined,
     ]);
@@ -1133,72 +1206,6 @@ async function provisionResources<B extends Bindings>(
       );
     }
     return binding.namespace_id;
-  }
-
-  function normalizeCustomDomains() {
-    if (!props.domains) {
-      return undefined;
-    }
-    const domains = props.domains.map((domain) => {
-      if (typeof domain === "string") {
-        return {
-          name: domain,
-          zoneId: undefined,
-          adopt: props.adopt,
-        };
-      }
-      return {
-        name: domain.domainName,
-        zoneId: domain.zoneId,
-        adopt: domain.adopt ?? props.adopt,
-      };
-    });
-    assertUnique(domains, "name", "Custom Domain");
-    return domains;
-  }
-
-  function normalizeEventSources() {
-    if (!props.eventSources) {
-      return undefined;
-    }
-    return props.eventSources.map((eventSource) => {
-      if (isQueue(eventSource)) {
-        return {
-          queue: eventSource,
-          settings: eventSource.dlq
-            ? { deadLetterQueue: eventSource.dlq }
-            : undefined,
-        };
-      }
-      if (isQueueEventSource(eventSource)) {
-        return {
-          queue: eventSource.queue,
-          settings: eventSource.settings,
-        };
-      }
-      throw new Error(`Unsupported event source: ${eventSource}`);
-    });
-  }
-
-  function normalizeRoutes() {
-    if (!props.routes) {
-      return undefined;
-    }
-    const routes = props.routes.map((route) => {
-      if (typeof route === "string") {
-        return {
-          pattern: route,
-          adopt: props.adopt,
-        };
-      }
-      return {
-        pattern: route.pattern,
-        zoneId: route.zoneId,
-        adopt: route.adopt ?? props.adopt,
-      };
-    });
-    assertUnique(routes, "pattern", "Route");
-    return routes;
   }
 }
 
@@ -1448,26 +1455,67 @@ export async function putWorker(
   );
 }
 
-const workerExists = memoize(
-  async (
-    api: CloudflareApi,
-    options: {
-      name: string;
-      dispatchNamespace: string | undefined;
-    },
-  ) => {
-    const res = await api.get(
-      options.dispatchNamespace
-        ? `/accounts/${api.accountId}/workers/dispatch/namespaces/${options.dispatchNamespace}/scripts/${options.name}`
-        : `/accounts/${api.accountId}/workers/scripts/${options.name}`,
-    );
-    return res.status === 200;
+const workerExists = async (
+  api: CloudflareApi,
+  options: {
+    name: string;
+    dispatchNamespace: string | undefined;
   },
-  (api, options) =>
-    [api.accountId, options.dispatchNamespace, options.name]
-      .filter(Boolean)
-      .join(":"),
-);
+) => {
+  const res = await api.get(
+    options.dispatchNamespace
+      ? `/accounts/${api.accountId}/workers/dispatch/namespaces/${options.dispatchNamespace}/scripts/${options.name}`
+      : `/accounts/${api.accountId}/workers/scripts/${options.name}`,
+  );
+  return res.status === 200;
+};
+
+async function assertWorkerDoesNotExist(
+  api: CloudflareApi,
+  scriptName: string,
+) {
+  const response = await api.get(
+    `/accounts/${api.accountId}/workers/scripts/${scriptName}`,
+  );
+  if (response.status === 404) {
+    return true;
+  }
+  if (response.status === 200) {
+    const metadata = await getScriptMetadata(api, scriptName);
+
+    if (!metadata) {
+      throw new Error(
+        `Worker exists but failed to fetch metadata: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    throw new Error(
+      `Worker with name '${scriptName}' already exists. Please use a unique name.`,
+    );
+  }
+  throw new Error(
+    `Error checking if worker exists: ${response.status} ${response.statusText} ${await response.text()}`,
+  );
+}
+
+async function getScriptMetadata(
+  api: CloudflareApi,
+  scriptName: string,
+): Promise<WorkerScriptMetadata | undefined> {
+  const res = await api.get(
+    `/accounts/${api.accountId}/workers/services/${scriptName}`,
+  );
+  if (res.status === 404) {
+    return;
+  }
+  if (!res.ok) {
+    throw new Error(
+      `Error getting worker script metadata: ${res.status} ${res.statusText}`,
+    );
+  }
+  const json = (await res.json()) as { result: WorkerScriptMetadata };
+  return json.result;
+}
 
 async function deleteQueueConsumers(api: CloudflareApi, scriptName: string) {
   const consumers = await listQueueConsumersForWorker(api, scriptName);
