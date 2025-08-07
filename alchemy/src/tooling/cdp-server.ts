@@ -35,7 +35,7 @@ export class CoreCDPServer {
     });
 
     // Handle WebSocket upgrades for CDP connections
-    this.server.on('upgrade', (request, socket, head) => {
+    this.server.on("upgrade", (request, socket, head) => {
       this.handleUpgrade(request, socket, head);
     });
 
@@ -83,33 +83,43 @@ export class CoreCDPServer {
 
   private handleUpgrade(request: any, socket: any, head: any): void {
     try {
-      logger.log(`[CoreCDPServer] Handling upgrade request for: ${request.url}`);
+      logger.log(
+        `[CoreCDPServer] Handling upgrade request for: ${request.url}`,
+      );
       const url = new URL(request.url, this.url);
       logger.log(`[CoreCDPServer] Parsed URL pathname: ${url.pathname}`);
-      
+
       // Check if this is a request to /servers/<name>
       const match = url.pathname.match(/^\/servers\/(.+)$/);
       if (match) {
         const serverName = match[1];
         logger.log(`[CoreCDPServer] Looking for CDP server: ${serverName}`);
-        logger.log(`[CoreCDPServer] Available servers: ${Array.from(this.cdpServers.keys()).join(', ')}`);
-        
+        logger.log(
+          `[CoreCDPServer] Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
+        );
+
         const cdpServer = this.cdpServers.get(serverName);
-        
+
         if (cdpServer) {
-          logger.log(`[CoreCDPServer] Found CDP server ${serverName}, forwarding upgrade`);
+          logger.log(
+            `[CoreCDPServer] Found CDP server ${serverName}, forwarding upgrade`,
+          );
           // Forward the upgrade to the CDP server's WebSocket server
           cdpServer.handleUpgrade(request, socket, head);
         } else {
-          logger.warn(`[CoreCDPServer] CDP server ${serverName} not found, destroying socket`);
+          logger.warn(
+            `[CoreCDPServer] CDP server ${serverName} not found, destroying socket`,
+          );
           socket.destroy();
         }
       } else {
-        logger.warn(`[CoreCDPServer] Invalid path ${url.pathname}, destroying socket`);
+        logger.warn(
+          `[CoreCDPServer] Invalid path ${url.pathname}, destroying socket`,
+        );
         socket.destroy();
       }
     } catch (error) {
-      logger.error(`[CoreCDPServer] Error handling upgrade:`, error);
+      logger.error("[CoreCDPServer] Error handling upgrade:", error);
       socket.destroy();
     }
   }
@@ -120,12 +130,15 @@ export class CoreCDPServer {
     const rootCDP = new CDPProxy(wsUrl, {
       name: "alchemy",
       server: this.server,
+      domains: new Set(["Inspector", "Console", "Runtime", "Debugger"]),
     });
-    
+
     // Store the CDP server in the map
     this.cdpServers.set("alchemy", rootCDP);
-    logger.log(`[CoreCDPServer] Root CDP registered. Available servers: ${Array.from(this.cdpServers.keys()).join(', ')}`);
-    
+    logger.log(
+      `[CoreCDPServer] Root CDP registered. Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
+    );
+
     if (this.rootCDPResolve) {
       this.rootCDPResolve();
     }
@@ -155,6 +168,7 @@ export abstract class CDPServer {
   protected domains: Set<string>;
   protected name: string;
   private wss: WebSocketServer;
+  private lastClient: WsWebSocket | null = null;
 
   constructor(options: {
     name: string;
@@ -177,6 +191,7 @@ export abstract class CDPServer {
 
     this.wss.on("connection", async (clientWs) => {
       logger.log(`[${this.name}] New WebSocket connection established`);
+      this.lastClient = clientWs;
       clientWs.on("message", async (data) => {
         await this.handleClientMessage(clientWs, data.toString());
       });
@@ -188,20 +203,24 @@ export abstract class CDPServer {
   }
 
   protected async handleInspectorMessage(data: string) {
-		try {
-    const message = JSON.parse(data);
-		const messageDomain = message.method?.split(".")?.[0];
-    if (!this.domains.has(messageDomain)) {
-      return;
+    try {
+      const message = JSON.parse(data);
+      const messageDomain = message.method?.split(".")?.[0];
+      //todo(michael): this check is messy and doesn't work well for responses
+      if (messageDomain != null && !this.domains.has(messageDomain)) {
+        return;
+      }
+      if (message.id == null) {
+        await fs.promises.appendFile(this.logFile, `${data}\n`);
+      }
+      if (this.lastClient != null) {
+        this.lastClient.send(data);
+      }
+    } catch (error) {
+      console.error(error);
+      console.log(data);
     }
-    if (message.id == null) {
-      await fs.promises.appendFile(this.logFile, `${data}\n`);
-    }
-		} catch (error) {
-			console.error(error);
-			console.log(data);
-		}
-	}
+  }
 
   abstract handleClientMessage(ws: WsWebSocket, data: string): Promise<void>;
 
@@ -209,8 +228,10 @@ export abstract class CDPServer {
     try {
       logger.log(`[${this.name}] Handling WebSocket upgrade`);
       this.wss.handleUpgrade(request, socket, head, (ws) => {
-        logger.log(`[${this.name}] WebSocket upgrade successful, emitting connection`);
-        this.wss.emit('connection', ws, request);
+        logger.log(
+          `[${this.name}] WebSocket upgrade successful, emitting connection`,
+        );
+        this.wss.emit("connection", ws, request);
       });
     } catch (error) {
       logger.error(`[${this.name}] Error during WebSocket upgrade:`, error);
@@ -231,10 +252,10 @@ export class CDPProxy extends CDPServer {
     this.attachHandlersToInspectorWs();
   }
 
-	async handleClientMessage(ws: WsWebSocket, data: string): Promise<void> {
-		logger.log(`[${this.name}] Client message:`, data);
-		this.inspectorWs.send(data);
-	}
+  async handleClientMessage(ws: WsWebSocket, data: string): Promise<void> {
+    logger.log(`[${this.name}] Client message:`, data);
+    this.inspectorWs.send(data);
+  }
 
   private attachHandlersToInspectorWs() {
     this.inspectorWs.onmessage = async (event) => {
