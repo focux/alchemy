@@ -1,7 +1,7 @@
 import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import type { Secret } from "../secret.ts";
-import { createVercelApi } from "./api";
+import { createVercelApi } from "./api.ts";
 import type { StorageProject, StorageProjectMetadata, StorageType } from "./storage.types.ts";
 import { createProjectsConnection, createStorage, deleteProjectsConnection, deleteStorage, projectPropsChanged, readStorage } from './storage.utils.ts';
 import type { VercelRegions, VercelTeam } from "./vercel.types.ts";
