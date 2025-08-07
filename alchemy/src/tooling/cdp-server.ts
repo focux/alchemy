@@ -142,7 +142,6 @@ export class CoreCDPServer {
           this.debuggerResolve();
         }
       },
-      isRootCDP: true,
     });
 
     // Store the CDP server in the map
@@ -192,7 +191,6 @@ export abstract class CDPServer {
     logFile?: string;
     domains?: Set<string>;
     onDebuggerConnected?: () => void;
-    isRootCDP?: boolean;
   }) {
     logger.log(`[CDPServer] Creating CDP server: ${options.name}`);
     this.domains = options.domains ?? new Set(["Console"]);

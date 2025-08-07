@@ -17,7 +17,7 @@ import { isRuntime } from "./runtime/global.ts";
 import { DEFAULT_STAGE, Scope } from "./scope.ts";
 import { secret } from "./secret.ts";
 import type { StateStoreType } from "./state.ts";
-import { CoreCDPServer } from "./tooling/cdp-server.ts";
+import { CoreCDPServer } from "./tooling/cdp-server-remote.ts";
 import type { LoggerApi } from "./util/cli.ts";
 import { logger } from "./util/logger.ts";
 import { TelemetryClient } from "./util/telemetry/client.ts";
