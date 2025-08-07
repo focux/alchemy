@@ -2,10 +2,20 @@ import type { Context } from "../context.ts";
 import { Resource } from "../resource.ts";
 import type { Secret } from "../secret.ts";
 import { createVercelApi } from "./api.ts";
-import type { StorageProject, StorageProjectMetadata, StorageType } from "./storage.types.ts";
-import { createProjectsConnection, createStorage, deleteProjectsConnection, deleteStorage, projectPropsChanged, readStorage } from './storage.utils.ts';
+import type {
+  StorageProject,
+  StorageProjectMetadata,
+  StorageType,
+} from "./storage.types.ts";
+import {
+  createProjectsConnection,
+  createStorage,
+  deleteProjectsConnection,
+  deleteStorage,
+  projectPropsChanged,
+  readStorage,
+} from "./storage.utils.ts";
 import type { VercelRegions, VercelTeam } from "./vercel.types.ts";
-
 
 export interface StorageProps {
   /**
@@ -163,21 +173,25 @@ export const Storage = Resource(
 
       case "update": {
         if (
-          props.name !== this.output.name
-          || props.region !== this.output.region
-          || props.team !== this.output.team
-          || props.type !== this.output.type
+          props.name !== this.output.name ||
+          props.region !== this.output.region ||
+          props.team !== this.output.team ||
+          props.type !== this.output.type
         ) {
           // if the storage is being replaced, we need to delete the old storage
           // name can be a conflict and we can't change the remaining properties
-          return this.replace(true)
+          return this.replace(true);
         }
 
         const newProjects = props.projects ?? [];
-        const newProjectsMap = new Map(newProjects.map((p) => [p.projectId, p]));
+        const newProjectsMap = new Map(
+          newProjects.map((p) => [p.projectId, p]),
+        );
 
         const currentProjects = this.output.projects ?? [];
-        const currentProjectsMap = new Map(currentProjects.map((p) => [p.projectId, p]));
+        const currentProjectsMap = new Map(
+          currentProjects.map((p) => [p.projectId, p]),
+        );
 
         const projectsMetadata = this.output.projectsMetadata ?? [];
 
@@ -205,7 +219,9 @@ export const Storage = Resource(
 
         const toDeleteMetadata: typeof projectsMetadata = [];
         for (const delProject of toDelete) {
-          const metas = projectsMetadata.filter(meta => meta.projectId === delProject.projectId);
+          const metas = projectsMetadata.filter(
+            (meta) => meta.projectId === delProject.projectId,
+          );
           toDeleteMetadata.push(...metas);
         }
 

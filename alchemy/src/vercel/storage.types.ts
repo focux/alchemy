@@ -1,15 +1,15 @@
-import type { VercelEnvironments } from "./vercel.types.ts";
+import type { VercelEnvironment } from "./vercel.types.ts";
 
 export type StorageType = "blob";
 
 export interface StorageProject {
   projectId: string;
-  envVarEnvironments: VercelEnvironments;
+  envVarEnvironments: VercelEnvironment[];
   envVarPrefix?: string;
 }
 
 export interface StorageProjectMetadata {
-  environments: VercelEnvironments;
+  environments: VercelEnvironment[];
   environmentVariables: string[];
   envVarPrefix?: string;
   framework: string;
