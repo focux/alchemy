@@ -17,6 +17,7 @@ import { isRuntime } from "./runtime/global.ts";
 import { DEFAULT_STAGE, Scope } from "./scope.ts";
 import { secret } from "./secret.ts";
 import type { StateStoreType } from "./state.ts";
+import { CoreCDPServer } from "./tooling/cdp-server.ts";
 import type { LoggerApi } from "./util/cli.ts";
 import { logger } from "./util/logger.ts";
 import { TelemetryClient } from "./util/telemetry/client.ts";
@@ -143,7 +144,8 @@ async function _alchemy(
       watch: cliArgs.includes("--watch"),
       quiet: cliArgs.includes("--quiet"),
       force: cliArgs.includes("--force"),
-      waitForRootCDPServer: cliArgs.includes("--waitForRootCDP"),
+      waitForRootCDPServer: cliArgs.includes("--wait-for-root-cdp"),
+      waitForDebugger: cliArgs.includes("--wait-for-debugger"),
       // Parse stage argument (--stage my-stage) functionally and inline as a property declaration
       stage: (function parseStage() {
         const i = cliArgs.indexOf("--stage");
@@ -173,7 +175,6 @@ async function _alchemy(
       phase,
       password: mergedOptions?.password ?? process.env.ALCHEMY_PASSWORD,
       telemetryClient,
-      waitForRootCDPServer: mergedOptions.waitForRootCDPServer ?? false,
     });
     onExit((code) => {
       root.cleanup().then(() => {
@@ -194,7 +195,16 @@ async function _alchemy(
 
       // Add delay using stage.run() to preserve context
       await stage.run(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // await new Promise((resolve) => setTimeout(resolve, 1000));
+        const cdpServer = new CoreCDPServer();
+        console.log("WAITING FOR DEBUGGER");
+        if (mergedOptions?.waitForRootCDPServer) {
+          await cdpServer.waitForRootCDP();
+        }
+        if (mergedOptions?.waitForDebugger) {
+          await cdpServer.waitForDebugger();
+        }
+        console.log("FINISHED WAITING FOR DEBUGGER");
       });
     } catch {
       // we are in Cloudflare Workers, we will emulate the enterWith behavior
@@ -408,6 +418,12 @@ export interface AlchemyOptions {
    * @default false
    */
   waitForRootCDPServer?: boolean;
+  /**
+   * Determines if alchemy should wait for a debugger to be connected before deploying resources
+   *
+   * @default false
+   */
+  waitForDebugger?: boolean;
 }
 
 export interface ScopeOptions extends AlchemyOptions {

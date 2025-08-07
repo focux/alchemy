@@ -9,6 +9,8 @@ export class CoreCDPServer {
   private server: Server;
   private rootCDPPromise: Promise<void>;
   private rootCDPResolve?: () => void;
+  private debuggerPromise: Promise<void>;
+  private debuggerResolve?: () => void;
   private port?: number;
   private rootCDPUrl?: string;
   private url?: string;
@@ -27,6 +29,9 @@ export class CoreCDPServer {
     // Initialize the promise for waiting for root CDP
     this.rootCDPPromise = new Promise((resolve) => {
       this.rootCDPResolve = resolve;
+    });
+    this.debuggerPromise = new Promise((resolve) => {
+      this.debuggerResolve = resolve;
     });
 
     // 1. Create server
@@ -131,6 +136,13 @@ export class CoreCDPServer {
       name: "alchemy",
       server: this.server,
       domains: new Set(["Inspector", "Console", "Runtime", "Debugger"]),
+      //todo(michael): UGHHH GROSS
+      onDebuggerConnected: () => {
+        if (this.debuggerResolve) {
+          this.debuggerResolve();
+        }
+      },
+      isRootCDP: true,
     });
 
     // Store the CDP server in the map
@@ -146,6 +158,10 @@ export class CoreCDPServer {
 
   public async waitForRootCDP(): Promise<void> {
     return this.rootCDPPromise;
+  }
+
+  public async waitForDebugger(): Promise<void> {
+    return this.debuggerPromise;
   }
 
   public getPort(): number | undefined {
@@ -175,6 +191,8 @@ export abstract class CDPServer {
     server: Server;
     logFile?: string;
     domains?: Set<string>;
+    onDebuggerConnected?: () => void;
+    isRootCDP?: boolean;
   }) {
     logger.log(`[CDPServer] Creating CDP server: ${options.name}`);
     this.domains = options.domains ?? new Set(["Console"]);
@@ -183,7 +201,6 @@ export abstract class CDPServer {
       path.join(process.cwd(), ".alchemy", "logs", `${options.name}.log`);
     this.name = options.name;
     fs.writeFileSync(this.logFile, "");
-
     logger.log(`[CDPServer] Initializing WebSocket server for: ${this.name}`);
     this.wss = new WebSocketServer({
       noServer: true, // Don't automatically handle upgrades
@@ -192,12 +209,43 @@ export abstract class CDPServer {
     this.wss.on("connection", async (clientWs) => {
       logger.log(`[${this.name}] New WebSocket connection established`);
       this.lastClient = clientWs;
+
+      let debuggerConnectedTimeout: NodeJS.Timeout | null = null;
+
+      const startTimer = () => {
+        if (debuggerConnectedTimeout) {
+          clearTimeout(debuggerConnectedTimeout);
+        }
+        debuggerConnectedTimeout = setTimeout(() => {
+          logger.log(
+            `[${this.name}] No messages for 25ms, calling onDebuggerConnected`,
+          );
+          options.onDebuggerConnected?.();
+        }, 25);
+      };
+
+      const resetTimer = () => {
+        startTimer();
+      };
+
+      const clearTimer = () => {
+        if (debuggerConnectedTimeout) {
+          clearTimeout(debuggerConnectedTimeout);
+          debuggerConnectedTimeout = null;
+        }
+      };
+
+      // Start the initial timer
+      startTimer();
+
       clientWs.on("message", async (data) => {
+        resetTimer();
         await this.handleClientMessage(clientWs, data.toString());
       });
 
       clientWs.on("close", () => {
         logger.log(`[${this.name}] Client closed`);
+        clearTimer();
       });
     });
   }

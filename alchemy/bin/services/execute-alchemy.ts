@@ -47,6 +47,11 @@ export const execArgs = {
     .optional()
     .default(".env")
     .describe("Path to environment file to load"),
+  waitForDebugger: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe("Wait for a debugger to be connected"),
 } as const;
 
 export async function execAlchemy(
@@ -55,6 +60,7 @@ export async function execAlchemy(
     cwd = process.cwd(),
     quiet,
     force,
+    waitForDebugger,
     stage,
     destroy,
     watch,
@@ -65,6 +71,7 @@ export async function execAlchemy(
     cwd?: string;
     quiet?: boolean;
     force?: boolean;
+    waitForDebugger?: boolean;
     stage?: string;
     destroy?: boolean;
     watch?: boolean;
@@ -84,7 +91,8 @@ export async function execAlchemy(
   if (envFile) execArgs.push(`--env-file ${envFile}`);
   if (dev) args.push("--dev");
   if (dev) execArgs.push("--inspect");
-  if (dev) args.push("--waitForRootCDP");
+  if (waitForDebugger) args.push("--wait-for-root-cdp");
+  if (waitForDebugger) args.push("--wait-for-debugger");
 
   // Check for alchemy.run.ts or alchemy.run.js (if not provided)
   if (!main) {
