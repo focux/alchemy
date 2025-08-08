@@ -92,7 +92,8 @@ async function _apply<Out extends Resource>(
           [DestroyStrategy]: provider.options?.destroyStrategy ?? "sequential",
         },
         // deps: [...deps],
-        props,
+        // there are no "old props" on initialization
+        props: undefined,
       };
       await scope.state.set(resource[ResourceID], state);
     }
