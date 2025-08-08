@@ -1,4 +1,4 @@
-import type { CloudflareApi } from "./api";
+import type { CloudflareApi } from "./api.ts";
 
 export type BotManagement =
   | BotFightModeConfiguration
