@@ -1,3 +1,13 @@
+type Handler<F extends (input: any, env: any, ctx: any) => any> = (
+  ...args: Parameters<F>
+) => Promise<Awaited<ReturnType<F>>>;
+
+export type ProxiedHandler = {
+  [key in keyof Required<ExportedHandler<any>>]: Handler<
+    Required<ExportedHandler<any>>[key]
+  >;
+};
+
 export const CONNECT_PATH = "/__alchemy__/connect";
 export const RPC_PATH = "/__alchemy__/rpc";
 

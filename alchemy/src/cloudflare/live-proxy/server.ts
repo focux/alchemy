@@ -1,5 +1,6 @@
 import { env } from "../../env.ts";
-import { link, type Link } from "./link.ts";
+import { connect } from "./connect.ts";
+import { link } from "./link.ts";
 import {
   isConnectRequest,
   isRpcRequest,
@@ -9,9 +10,12 @@ import {
   type HttpMethod,
   type HttpRequestMessage,
   type HttpResponseMessage,
+  type ProxiedHandler,
   type RpcMessage,
 } from "./protocol.ts";
-import { connect, socket } from "./websocket.ts";
+import { socket } from "./socket.ts";
+
+let _instance: DurableObjectStub;
 
 export declare namespace Server {
   export interface Env {
@@ -21,20 +25,6 @@ export declare namespace Server {
   }
 }
 
-type Handler<F extends (input: any, env: any, ctx: any) => any> = (
-  input: Parameters<F>[0],
-  ctx: Parameters<F>[1],
-) => Promise<ReturnType<F>>;
-
-export type ProxiedHandler = {
-  [key in keyof Required<ExportedHandler<any>>]: Handler<
-    Required<ExportedHandler<any>>[key]
-  >;
-};
-
-let _link: Link;
-let _instance: DurableObjectStub;
-
 /**
  * A Durable Object that coordinates the RPC connection between the local worker and the remote worker.
  */
@@ -43,21 +33,17 @@ export class Server implements DurableObject {
     return env as any as Server.Env;
   }
 
-  static async rpc<Output>(name: string, ...args: any[]): Promise<Output> {
-    return (await Server.link()).rpc(name, ...args);
+  static fetch(request: Request) {
+    return Server.instance.fetch(request);
   }
 
   static async link() {
-    return (_link ??= link(
+    return link<ProxiedHandler>(
       await connect(Server.instance, {
-        auth: Server.env.SESSION_SECRET,
+        token: Server.env.SESSION_SECRET,
         path: RPC_PATH,
       }),
-    ));
-  }
-
-  static fetch(request: Request) {
-    return Server.instance.fetch(request);
+    );
   }
 
   static get instance() {

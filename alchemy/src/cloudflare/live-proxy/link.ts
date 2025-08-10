@@ -1,4 +1,3 @@
-import type { Secret } from "../../secret.ts";
 import type {
   CallbackMessage,
   CallMessage,
@@ -6,30 +5,25 @@ import type {
   Functions,
   ResultMessage,
 } from "./protocol.ts";
-import { connect } from "./websocket.ts";
 
+/**
+ * A bi-directional RPC link between two workers.
+ */
 export type Link<F extends Functions = Functions> = {
-  [f in keyof F]: (...args: Parameters<F[f]>) => Promise<ReturnType<F[f]>>;
+  [f in keyof F]: (
+    ...args: Parameters<F[f]>
+  ) => Promise<Awaited<ReturnType<F[f]>>>;
 };
 
 /**
- * Creates a bi-directional link between a local (this) worker and a remote worker.
+ * Creates a bi-directional RPC link between two workers.
  *
- * The Functions, {@link F}
+ * @param functions - functions that can be called over websocket RPC by the remote end.
  */
-export async function link<F extends Functions>(
-  remote: WebSocket | string | URL,
-  token: string | Secret<string>,
-  /**
-   * Functions hosted locally that the remote end can call.
-   */
-  functions: F,
+export async function link<F extends Functions = {}>(
+  remote: WebSocket,
+  functions?: Partial<F>,
 ): Promise<Link<F>> {
-  const socket =
-    typeof remote === "string" || remote instanceof URL
-      ? await connect(remote, { token })
-      : remote;
-
   let callInc = 0;
   const callbacks: {
     [id: number]: {
@@ -42,10 +36,10 @@ export async function link<F extends Functions>(
   } = {};
 
   function send(message: CallMessage | ResultMessage | ErrorMessage) {
-    socket.send(JSON.stringify(message));
+    remote.send(JSON.stringify(message));
   }
 
-  socket.addEventListener("message", async (event) => {
+  remote.addEventListener("message", async (event) => {
     const message = JSON.parse(event.data) as
       | CallMessage
       | CallbackMessage
@@ -122,19 +116,19 @@ export async function link<F extends Functions>(
 
   const { promise: isOpen, resolve, reject } = Promise.withResolvers<void>();
 
-  socket.addEventListener("open", () => {
+  remote.addEventListener("open", () => {
     // bi-directional connection is established between the Worker<->Coordinator<->Local
     // it is now safe to trigger the local worker to execute the function
     resolve();
   });
 
-  socket.addEventListener("close", () => {});
+  remote.addEventListener("close", () => {});
 
-  socket.addEventListener("error", () => {
+  remote.addEventListener("error", () => {
     reject(new Error("Connection error"));
   });
 
-  return new Proxy(functions, {
+  return new Proxy(functions ?? {}, {
     get:
       (_, functionId: Extract<keyof F, string>) =>
       async (...args: any[]) => {

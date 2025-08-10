@@ -1,36 +1,29 @@
-import { isConnectRequest, isRpcRequest } from "./protocol.ts";
+import type { Link } from "./link.ts";
+import {
+  isConnectRequest,
+  isRpcRequest,
+  type ProxiedHandler,
+} from "./protocol.ts";
 import { Server } from "./server.ts";
 
-/**
- * Remote Worker entrypoint that proxies RPC requests to a Local Worker through a central Coordinator DO.
- */
+let _link: Promise<Link<ProxiedHandler>>;
+
+// Proxies a function call to a Local Worker through a central Coordinator DO.
+const local =
+  (prop: keyof ProxiedHandler) =>
+  async (...args: any[]): Promise<any> =>
+    (await (_link ??= Server.link()))[prop](...args);
+
 export default {
   // hooks called by the Cloudflare platform for push-based events
-  async scheduled(controller) {
-    await Server.rpc("scheduled", controller);
-  },
-  async queue(batch, _, ctx) {
-    await Server.rpc("queue", batch, ctx);
-  },
-  async email(message, _, ctx) {
-    await Server.rpc("email", message, ctx);
-  },
-  async tail(events, _, ctx) {
-    await Server.rpc("tail", events, ctx);
-  },
-  async tailStream(event, _, ctx) {
-    return Server.rpc<TailStream.TailEventHandlerType>(
-      "tailStream",
-      event,
-      ctx,
-    );
-  },
-  async test(controller, _, ctx) {
-    await Server.rpc("test", controller, ctx);
-  },
-  async trace(events, _, ctx) {
-    await Server.rpc("trace", events, ctx);
-  },
+  scheduled: local("scheduled"),
+  queue: local("queue"),
+  email: local("email"),
+  tail: local("tail"),
+  tailStream: local("tailStream"),
+  test: local("test"),
+  trace: local("trace"),
+
   // inbound requests from the public internet to the remote worker
   async fetch(request: Request): Promise<Response> {
     if (isConnectRequest(request)) {
@@ -46,7 +39,7 @@ export default {
     } else if (isRpcRequest(request)) {
       // explicitly disallow RPC requests from the public internet
       return new Response("Cannot initiate RPC from remote worker", {
-        status: 400,
+        status: 404,
       });
     }
     return Server.fetch(request);
