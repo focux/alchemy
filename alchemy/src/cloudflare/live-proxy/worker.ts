@@ -10,27 +10,27 @@ export default {
     await Server.rpc("scheduled", controller);
   },
   async queue(batch, _, ctx) {
-    ctx.passThroughOnException;
-    ctx.waitUntil;
-    ctx.props;
-    await Server.rpc("queue", batch);
+    await Server.rpc("queue", batch, ctx);
   },
-  async email(message) {
-    await Server.rpc("email", message);
+  async email(message, _, ctx) {
+    await Server.rpc("email", message, ctx);
   },
-  async tail(events) {
-    await Server.rpc("tail", events);
+  async tail(events, _, ctx) {
+    await Server.rpc("tail", events, ctx);
   },
-  async tailStream(event) {
-    return Server.rpc<TailStream.TailEventHandlerType>("tailStream", event);
+  async tailStream(event, _, ctx) {
+    return Server.rpc<TailStream.TailEventHandlerType>(
+      "tailStream",
+      event,
+      ctx,
+    );
   },
-  async test(controller) {
-    await Server.rpc("test", controller);
+  async test(controller, _, ctx) {
+    await Server.rpc("test", controller, ctx);
   },
-  async trace(events) {
-    await Server.rpc("trace", events);
+  async trace(events, _, ctx) {
+    await Server.rpc("trace", events, ctx);
   },
-
   // inbound requests from the public internet to the remote worker
   async fetch(request: Request): Promise<Response> {
     if (isConnectRequest(request)) {

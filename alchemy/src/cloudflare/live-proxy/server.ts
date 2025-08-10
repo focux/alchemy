@@ -1,8 +1,9 @@
 import { env } from "../../env.ts";
-import { connect } from "./connect.ts";
+import { link, type Link } from "./link.ts";
 import {
   isConnectRequest,
   isRpcRequest,
+  RPC_PATH,
   serializeHeaders,
   type HttpMessage,
   type HttpMethod,
@@ -10,8 +11,7 @@ import {
   type HttpResponseMessage,
   type RpcMessage,
 } from "./protocol.ts";
-import { rpc } from "./rpc.ts";
-import { websocket } from "./websocket.ts";
+import { connect, socket } from "./websocket.ts";
 
 export declare namespace Server {
   export interface Env {
@@ -20,6 +20,20 @@ export declare namespace Server {
     SESSION_SECRET: string;
   }
 }
+
+type Handler<F extends (input: any, env: any, ctx: any) => any> = (
+  input: Parameters<F>[0],
+  ctx: Parameters<F>[1],
+) => Promise<ReturnType<F>>;
+
+export type ProxiedHandler = {
+  [key in keyof Required<ExportedHandler<any>>]: Handler<
+    Required<ExportedHandler<any>>[key]
+  >;
+};
+
+let _link: Link;
+let _instance: DurableObjectStub;
 
 /**
  * A Durable Object that coordinates the RPC connection between the local worker and the remote worker.
@@ -30,21 +44,26 @@ export class Server implements DurableObject {
   }
 
   static async rpc<Output>(name: string, ...args: any[]): Promise<Output> {
-    return rpc<Output>(await Server.connect(), name, ...args);
+    return (await Server.link()).rpc(name, ...args);
   }
 
-  static connect() {
-    return connect(Server.server, Server.env.SESSION_SECRET);
+  static async link() {
+    return (_link ??= link(
+      await connect(Server.instance, {
+        auth: Server.env.SESSION_SECRET,
+        path: RPC_PATH,
+      }),
+    ));
   }
 
   static fetch(request: Request) {
-    return Server.server.fetch(request);
+    return Server.instance.fetch(request);
   }
 
-  static get server() {
-    return Server.env.COORDINATOR.get(
+  static get instance() {
+    return (_instance ??= Server.env.COORDINATOR.get(
       Server.env.COORDINATOR.idFromName("default"),
-    );
+    ));
   }
 
   /** A WebSocket connection to the Local Worker running on the developer's machine */
@@ -75,8 +94,8 @@ export class Server implements DurableObject {
       if (this.local) {
         return new Response("Already connected", { status: 400 });
       }
-      return websocket<RpcMessage | HttpResponseMessage>({
-        connect: (socket) => {
+      return socket<RpcMessage | HttpResponseMessage>({
+        open: (socket) => {
           this.local = {
             send: (message) => socket.send(JSON.stringify(message)),
           };
@@ -84,8 +103,8 @@ export class Server implements DurableObject {
         handle: (data) => {
           if (data.type === "http-response") {
             // the Local Worker has returned a response to an HTTP request, we should resolve the promise
-            if (this.requests.has(data.id)) {
-              const [resolve] = this.requests.get(data.id)!;
+            if (this.requests.has(data.requestId)) {
+              const [resolve] = this.requests.get(data.requestId)!;
               resolve(
                 new Response(data.body, {
                   status: data.status,
@@ -94,14 +113,14 @@ export class Server implements DurableObject {
               );
             } else {
               // TODO(sam): not sure if we can provide this feedback to the Local Worker (who has returned the response)
-              console.warn("Unknown request ID", data.id);
+              console.warn("Unknown request ID", data.requestId);
             }
           } else {
             // the Local Worker is sending a RpcMessage to the Remote Worker, so we just forward it
-            if (this.transactions.has(data.id)) {
-              this.transactions.get(data.id)!.send(JSON.stringify(data));
+            if (this.transactions.has(data.callId)) {
+              this.transactions.get(data.callId)!.send(JSON.stringify(data));
             } else {
-              console.warn("Unknown transaction ID", data.id);
+              console.warn("Unknown transaction ID", data.callId);
             }
           }
         },
@@ -118,11 +137,11 @@ export class Server implements DurableObject {
     } else if (isRpcRequest(request)) {
       // establish a WebSocket connection from (this) Coordinator to the (calling) Remote Worker
       if (!this.local) {
-        return new Response("Not connected", { status: 400 });
+        return notConnected();
       }
       const txId = this.counter++;
-      return websocket<RpcMessage>({
-        connect: (socket) => this.transactions.set(txId, socket),
+      return socket<RpcMessage>({
+        open: (socket) => this.transactions.set(txId, socket),
         // just forward the messages to the Local Worker
         handle: (data) => this.local!.send(data),
         close: () => this.transactions.delete(txId),
@@ -137,7 +156,7 @@ export class Server implements DurableObject {
 
       this.local.send({
         type: "http-request",
-        id: requestId,
+        requestId: requestId,
         method: request.method as HttpMethod,
         url: request.url,
         // TODO(sam): serializing the stream here is not ideal for large or long-lived streams
@@ -150,7 +169,13 @@ export class Server implements DurableObject {
 
       return promise;
     } else {
-      return new Response("Local worker is not connected", { status: 400 });
+      return notConnected();
     }
   }
 }
+
+const notConnected = () =>
+  new Response(
+    "Local worker is not connected. Please connect the local worker to the live proxy first.",
+    { status: 409 },
+  );

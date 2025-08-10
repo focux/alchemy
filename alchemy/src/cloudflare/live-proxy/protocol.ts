@@ -42,7 +42,7 @@ export function deserializeHeaders(json: string): Headers {
 export type HttpRequestMessage = {
   type: "http-request";
   /** an ID uniquely identifying this individual HTTP request */
-  id: number;
+  requestId: number;
   /** the HTTP request method */
   method: HttpMethod;
   /** the HTTP request URL */
@@ -56,7 +56,7 @@ export type HttpRequestMessage = {
 export type HttpResponseMessage = {
   type: "http-response";
   /** an ID uniquely identifying this individual HTTP request */
-  id: number;
+  requestId: number;
   /** the HTTP response status code */
   status: number;
   /** the HTTP response status text */
@@ -67,32 +67,42 @@ export type HttpResponseMessage = {
   headers: HttpHeaders;
 };
 
-export type RpcMessage = CallbackMessage | ResultMessage | ErrorMessage;
+export type RpcMessage =
+  | CallMessage
+  | CallbackMessage
+  | ResultMessage
+  | ErrorMessage;
+
+export type Functions = {
+  [functionName: string | number | symbol]: (...args: any[]) => any;
+};
 
 /** A message sent from the coordinator actor to the local worker to initiate a function call. */
 export type CallMessage = {
   type: "call";
+  /** an ID uniquely identifying this individual function call */
+  callId: number;
   /** the name of the function to call on the local worker */
-  name: string;
+  functionId: string;
   /** the arguments to the function call */
   args: any[];
 };
 
-/** A message sent from the local worker to the coordinator actor to call a function on the server. */
+/** A message sent as part of an inflight Call to call back to a function hosted in the initiator of the Call */
 export type CallbackMessage = {
   type: "callback";
-  /** an ID reference to the function */
-  func: number;
   /** an ID uniquely identifying this individual function call */
-  id: number;
+  callId: number;
+  /** the name of the function to call on the local worker */
+  functionId: number;
   /** the arguments to the function call */
-  params?: any[];
+  args: any[];
 };
 
 export type ResultMessage = {
   type: "result";
   /** an ID uniquely identifying this individual function call */
-  id: number;
+  callId: number;
   /** the output value of the function call */
   value: any;
 };
@@ -100,7 +110,7 @@ export type ResultMessage = {
 export type ErrorMessage = {
   type: "error";
   /** an ID uniquely identifying this individual function call */
-  id: number;
+  callId: number;
   /** the error message */
   message: string;
 };
