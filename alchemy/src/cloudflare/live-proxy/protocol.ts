@@ -8,15 +8,18 @@ export type ProxiedHandler = {
   >;
 };
 
-export const CONNECT_PATH = "/__alchemy__/connect";
-export const RPC_PATH = "/__alchemy__/rpc";
+// path the Local Worker uses to connect to the Coordinator through the Remote Worker
+export const LISTEN_PATH = "/__alchemy__/listen";
 
-export function isConnectRequest(request: Request) {
-  return new URL(request.url).pathname === CONNECT_PATH;
+// path the Remote Worker uses to connect to the Coordinator and execute RPC calls on the Local Worker
+export const CALL_PATH = "/__alchemy__/call";
+
+export function isListenRequest(request: Request) {
+  return new URL(request.url).pathname === LISTEN_PATH;
 }
 
-export function isRpcRequest(request: Request) {
-  return new URL(request.url).pathname === RPC_PATH;
+export function isCallRequest(request: Request) {
+  return new URL(request.url).pathname === CALL_PATH;
 }
 
 export type HttpMessage = HttpRequestMessage | HttpResponseMessage;
@@ -45,8 +48,8 @@ export function serializeHeaders(headers: Headers): HttpHeaders {
   return pairs;
 }
 
-export function deserializeHeaders(json: string): Headers {
-  return new Headers(JSON.parse(json) as HttpHeaders);
+export function deserializeHeaders(json: HttpHeaders): Headers {
+  return new Headers(json);
 }
 
 export type HttpRequestMessage = {

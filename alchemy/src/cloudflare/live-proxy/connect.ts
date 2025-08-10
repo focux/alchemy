@@ -1,35 +1,32 @@
 import type { Secret } from "../../secret.ts";
 
-type AuthOptions = {
+/**
+ * Connect to a WebSocket server.
+ *
+ * Supports a URL, Fetcher or a DurableObjectStub.
+ */
+export async function connect({
+  remote,
+  token,
+  path,
+}: {
+  remote: string | URL | DurableObjectStub | Fetcher;
   token?: string | Secret<string>;
-};
-
-type ConnectOptions = AuthOptions & {
   path: string;
-};
-
-export async function connect(
-  ...args:
-    | [url: string | URL, options?: AuthOptions]
-    | [fetcher: Fetcher | DurableObjectStub, options: ConnectOptions]
-): Promise<WebSocket> {
-  const [dest, options] = args;
+}): Promise<WebSocket> {
   const headers = {
     Upgrade: "websocket",
-    ...(options?.token
+    ...(token
       ? {
-          Authorization:
-            typeof options.token === "string"
-              ? options.token
-              : options.token.unencrypted,
+          Authorization: typeof token === "string" ? token : token.unencrypted,
         }
       : {}),
   };
-  const response = await (typeof dest === "string" || dest instanceof URL
-    ? fetch(dest, {
+  const response = await (typeof remote === "string" || remote instanceof URL
+    ? fetch(remote, {
         headers,
       })
-    : dest.fetch((options as ConnectOptions).path, {
+    : remote.fetch(path, {
         headers,
       }));
 

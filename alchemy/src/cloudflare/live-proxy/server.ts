@@ -1,57 +1,19 @@
-import { env } from "../../env.ts";
-import { connect } from "./connect.ts";
-import { link } from "./link.ts";
 import {
-  isConnectRequest,
-  isRpcRequest,
-  RPC_PATH,
+  isCallRequest,
+  isListenRequest,
   serializeHeaders,
   type HttpMessage,
   type HttpMethod,
   type HttpRequestMessage,
   type HttpResponseMessage,
-  type ProxiedHandler,
   type RpcMessage,
 } from "./protocol.ts";
 import { socket } from "./socket.ts";
-
-let _instance: DurableObjectStub;
-
-export declare namespace Server {
-  export interface Env {
-    // Durable Object namespace used for coordinating live proxy sessions
-    COORDINATOR: DurableObjectNamespace;
-    SESSION_SECRET: string;
-  }
-}
 
 /**
  * A Durable Object that coordinates the RPC connection between the local worker and the remote worker.
  */
 export class Server implements DurableObject {
-  static get env(): Server.Env {
-    return env as any as Server.Env;
-  }
-
-  static fetch(request: Request) {
-    return Server.instance.fetch(request);
-  }
-
-  static async link() {
-    return link<ProxiedHandler>(
-      await connect(Server.instance, {
-        token: Server.env.SESSION_SECRET,
-        path: RPC_PATH,
-      }),
-    );
-  }
-
-  static get instance() {
-    return (_instance ??= Server.env.COORDINATOR.get(
-      Server.env.COORDINATOR.idFromName("default"),
-    ));
-  }
-
   /** A WebSocket connection to the Local Worker running on the developer's machine */
   private local?: {
     send(message: RpcMessage | HttpMessage): void;
@@ -75,7 +37,7 @@ export class Server implements DurableObject {
       return new Response("Upgrade required", { status: 426 });
     }
 
-    if (isConnectRequest(request)) {
+    if (isListenRequest(request)) {
       // establish a WebSocket connection from the (calling) Local Worker to (this) Coordinator
       if (this.local) {
         return new Response("Already connected", { status: 400 });
@@ -120,7 +82,7 @@ export class Server implements DurableObject {
           this.local = undefined;
         },
       });
-    } else if (isRpcRequest(request)) {
+    } else if (isCallRequest(request)) {
       // establish a WebSocket connection from (this) Coordinator to the (calling) Remote Worker
       if (!this.local) {
         return notConnected();
