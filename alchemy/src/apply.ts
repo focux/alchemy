@@ -93,7 +93,7 @@ async function _apply<Out extends Resource>(
         },
         // deps: [...deps],
         // there are no "old props" on initialization
-        props: undefined,
+        props: {},
       };
       await scope.state.set(resource[ResourceID], state);
     }

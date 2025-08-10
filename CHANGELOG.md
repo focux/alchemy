@@ -1,3 +1,20 @@
+## v0.60.0
+
+### &nbsp;&nbsp;&nbsp;🚀 Features
+
+- **cloudflare**: WAF Ruleset resource &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/826 [<samp>(8c3d5)</samp>](https://github.com/sam-goodwin/alchemy/commit/8c3d59a)
+
+### &nbsp;&nbsp;&nbsp;🐞 Bug Fixes
+
+- **core**:
+  - Fail in CI if using the local state store &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/828 [<samp>(06502)</samp>](https://github.com/sam-goodwin/alchemy/commit/06502fe)
+  - Set props to {} on first create &nbsp;-&nbsp; by **Sam Goodwin** [<samp>(32f74)</samp>](https://github.com/sam-goodwin/alchemy/commit/32f749d)
+  - Instrumented state store should not swallot store errors &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/830 [<samp>(2a751)</samp>](https://github.com/sam-goodwin/alchemy/commit/2a75179)
+
+##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/sam-goodwin/alchemy/compare/v0.59.2...v0.60.0)
+
+---
+
 ## v0.59.2
 
 ### &nbsp;&nbsp;&nbsp;🚀 Features
