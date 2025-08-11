@@ -9,26 +9,28 @@ export async function connect({
   remote,
   token,
   path,
+  body,
 }: {
   remote: string | URL | DurableObjectStub | Fetcher;
   token?: string | Secret<string>;
   path: string;
+  body?: any;
 }): Promise<WebSocket> {
-  const headers = {
-    Upgrade: "websocket",
-    ...(token
-      ? {
-          Authorization: `Bearer ${typeof token === "string" ? token : token.unencrypted}`,
-        }
-      : {}),
+  const options: RequestInit = {
+    method: "POST",
+    body: body ? JSON.stringify(body) : undefined,
+    headers: {
+      Upgrade: "websocket",
+      ...(token
+        ? {
+            Authorization: `Bearer ${typeof token === "string" ? token : token.unencrypted}`,
+          }
+        : {}),
+    },
   };
   const response = await (typeof remote === "string" || remote instanceof URL
-    ? fetch(`${remote.toString()}${path}`, {
-        headers,
-      })
-    : remote.fetch(path, {
-        headers,
-      }));
+    ? fetch(`${remote.toString()}${path}`, options)
+    : remote.fetch(path, options));
 
   if (!response.ok || !response.webSocket) {
     throw new Error(

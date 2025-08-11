@@ -13,10 +13,12 @@ const token = alchemy.secret("placeholder");
 
 const queue = await Queue<{
   body: string;
-}>("my-queue");
+}>("my-queue", {
+  adopt: true,
+});
 
 const proxy = await Worker("live-proxy", {
-  entrypoint: "../../alchemy/workers/live-proxy-worker.ts",
+  entrypoint: "../../../workers/live-proxy-worker.ts",
   bindings: {
     SESSION_SECRET: token,
     COORDINATOR: DurableObjectNamespace("server", {
@@ -25,13 +27,18 @@ const proxy = await Worker("live-proxy", {
     QUEUE: queue,
   },
   adopt: true,
+  dev: {
+    remote: true,
+  },
 });
+
+console.log(proxy.url);
 
 await queue.send({
   body: "Hello, world!",
 });
 
-const client = await link<ProxiedHandler>({
+const client = link<ProxiedHandler>({
   role: "server",
   remote: proxy.url!,
   token,

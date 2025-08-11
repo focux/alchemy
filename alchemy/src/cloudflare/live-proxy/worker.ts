@@ -39,6 +39,7 @@ export default {
 
   // inbound requests from the public internet to the remote worker
   async fetch(request: Request): Promise<Response> {
+    console.log("HELLLOOOO");
     if (isListenRequest(request)) {
       // a special request that a Local Worker makes to establish a connection to the Coordinator
       const auth = request.headers.get("Authorization");
@@ -47,7 +48,12 @@ export default {
       }
       const upgrade = request.headers.get("Upgrade");
       if (upgrade !== "websocket") {
-        return new Response("Upgrade required", { status: 426 });
+        return new Response(
+          `Upgrade required: ${request.headers.get("Upgrade")}`,
+          {
+            status: 426,
+          },
+        );
       }
     } else if (isCallRequest(request)) {
       // explicitly disallow RPC requests from the public internet
