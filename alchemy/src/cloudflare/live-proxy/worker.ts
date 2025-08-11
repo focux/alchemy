@@ -61,6 +61,6 @@ export default {
         status: 404,
       });
     }
-    return await server().fetch(request);
+    return server().fetch(request);
   },
 } satisfies ExportedHandler<Env>;

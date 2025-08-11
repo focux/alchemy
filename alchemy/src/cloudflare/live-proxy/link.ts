@@ -29,16 +29,21 @@ export async function link<F extends Functions>({
   remote,
   token,
   functions,
+  tunnelUrl,
 }: {
   role: "server" | "client";
   remote: string | URL | DurableObjectStub | Fetcher;
   token?: string | Secret<string>;
   functions?: F;
+  tunnelUrl?: string;
 }): Promise<Link<Required<F>>> {
   const socket = await connect({
     remote,
     token,
     path: role === "server" ? LISTEN_PATH : CALL_PATH,
+    body: {
+      tunnelUrl,
+    },
   });
 
   let callInc = 0;

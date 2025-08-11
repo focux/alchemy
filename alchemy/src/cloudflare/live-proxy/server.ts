@@ -40,7 +40,9 @@ export class Server extends DurableObject {
         return new Response("Already connected", { status: 409 });
       }
       // we expect the Local Worker to know its tunnel URL and provide it to us when it connects
-      const { tunnelUrl } = (await request.json()) as {
+      const body = await request.text();
+      console.log({ body });
+      const { tunnelUrl } = JSON.parse(body) as {
         tunnelUrl: string;
       };
       if (!tunnelUrl) {

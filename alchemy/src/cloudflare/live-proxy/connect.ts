@@ -18,9 +18,10 @@ export async function connect({
 }): Promise<WebSocket> {
   const options: RequestInit = {
     method: "POST",
-    body: body ? JSON.stringify(body) : undefined,
+    body: JSON.stringify(body ?? {}),
     headers: {
       Upgrade: "websocket",
+      "Content-Type": "application/json",
       ...(token
         ? {
             Authorization: `Bearer ${typeof token === "string" ? token : token.unencrypted}`,
