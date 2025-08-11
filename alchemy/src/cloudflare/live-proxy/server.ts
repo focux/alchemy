@@ -1,35 +1,32 @@
-import {
-  isCallRequest,
-  isListenRequest,
-  serializeHeaders,
-  type HttpMessage,
-  type HttpMethod,
-  type HttpRequestMessage,
-  type HttpResponseMessage,
-  type RpcMessage,
-} from "./protocol.ts";
-import { socket } from "./socket.ts";
+import { DurableObject } from "cloudflare:workers";
+import { isCallRequest, isListenRequest, type RpcMessage } from "./protocol.ts";
 
 /**
  * A Durable Object that coordinates the RPC connection between the local worker and the remote worker.
  */
-export class Server implements DurableObject {
+export class Server extends DurableObject {
   /** A WebSocket connection to the Local Worker running on the developer's machine */
   private local?: {
-    send(message: RpcMessage | HttpMessage): void;
+    fetch(request: Request): Promise<Response>;
+    send(message: RpcMessage): void;
   };
   /** A map of transaction IDs to Remote Worker WebSocket connections */
-  private readonly transactions = new Map<number, WebSocket>();
-  /** A map of pending HTTP requests to their corresponding promise callbacks */
-  private readonly requests = new Map<
-    number,
-    [resolve: (response: Response) => void, reject: (error: Error) => void]
-  >();
+  private readonly calls = new Map<number, WebSocket>();
 
-  // TODO(sam): should we store in the DO state so that connection interruptions
-  // can be resumed, even if the Worker hosting the DO is restarted?
-  private counter = 0;
-  // private state: DurableObjectState;
+  // cached value of the counter - we access durable storage only on writes or when initializing the object
+  private _counter = 0;
+
+  async nextId() {
+    const id = this._counter++;
+    await this.ctx.storage.put("counter", this._counter);
+    return id;
+  }
+
+  constructor(ctx: DurableObjectState, env: any) {
+    super(ctx, env);
+
+    ctx.blockConcurrencyWhile(() => this.restoreWebSockets());
+  }
 
   async fetch(request: Request): Promise<Response> {
     // the DO only accepts web socket connections
@@ -40,90 +37,144 @@ export class Server implements DurableObject {
     if (isListenRequest(request)) {
       // establish a WebSocket connection from the (calling) Local Worker to (this) Coordinator
       if (this.local) {
-        return new Response("Already connected", { status: 400 });
+        return new Response("Already connected", { status: 409 });
       }
-      return socket<RpcMessage | HttpResponseMessage>({
-        open: (socket) => {
-          this.local = {
-            send: (message) => socket.send(JSON.stringify(message)),
-          };
+      // we expect the Local Worker to know its tunnel URL and provide it to us when it connects
+      const { tunnelUrl } = (await request.json()) as {
+        tunnelUrl: string;
+      };
+      if (!tunnelUrl) {
+        return new Response("Missing tunnel URL", { status: 400 });
+      }
+      const [client, server] = this.webSocket({
+        type: "listen",
+        tunnelUrl,
+      });
+      this.local = {
+        send(message) {
+          server.send(JSON.stringify(message));
         },
-        handle: (data) => {
-          if (data.type === "http-response") {
-            // the Local Worker has returned a response to an HTTP request, we should resolve the promise
-            if (this.requests.has(data.requestId)) {
-              const [resolve] = this.requests.get(data.requestId)!;
-              resolve(
-                new Response(data.body, {
-                  status: data.status,
-                  headers: new Headers(data.headers),
-                }),
-              );
-            } else {
-              // TODO(sam): not sure if we can provide this feedback to the Local Worker (who has returned the response)
-              console.warn("Unknown request ID", data.requestId);
-            }
-          } else {
-            // the Local Worker is sending a RpcMessage to the Remote Worker, so we just forward it
-            if (this.transactions.has(data.callId)) {
-              this.transactions.get(data.callId)!.send(JSON.stringify(data));
-            } else {
-              console.warn("Unknown transaction ID", data.callId);
-            }
-          }
+        fetch(request) {
+          const url = new URL(request.url);
+          const localUrl = new URL(tunnelUrl);
+          // re-route the request to the Local Worker (on http://localhost:****)
+          url.hostname = localUrl.hostname;
+          url.port = localUrl.port;
+          url.protocol = localUrl.protocol;
+          return fetch(url, request);
         },
-        close: () => {
-          // we just lost connection to the Local Worker, reject all pending HTTP requests
-          // TODO(sam): should we allow the Local Worker to reconnect and continue existing requests? -> probably yes
-          for (const [id, [, reject]] of this.requests) {
-            reject(new Error("Connection closed"));
-            this.requests.delete(id);
-          }
-          this.local = undefined;
-        },
+      };
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
       });
     } else if (isCallRequest(request)) {
       // establish a WebSocket connection from (this) Coordinator to the (calling) Remote Worker
       if (!this.local) {
         return notConnected();
       }
-      const txId = this.counter++;
-      return socket<RpcMessage>({
-        open: (socket) => this.transactions.set(txId, socket),
-        // just forward the messages to the Local Worker
-        handle: (data) => this.local!.send(data),
-        close: () => this.transactions.delete(txId),
+      const [client] = this.webSocket({
+        type: "call",
+        callId: await this.nextId(),
+      });
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
       });
     } else if (this.local) {
       // inbound request from the public internet received by the remote worker
-      const requestId = this.counter++;
-
-      const { promise, resolve, reject } = Promise.withResolvers<Response>();
-      // register the promise before sending the message to ensure zero race conditions
-      this.requests.set(requestId, [resolve, reject]);
-
-      this.local.send({
-        type: "http-request",
-        requestId: requestId,
-        method: request.method as HttpMethod,
-        url: request.url,
-        // TODO(sam): serializing the stream here is not ideal for large or long-lived streams
-        // for that, we would probably be better off using a Tunnel (cloudflared, or tailscale?)
-        // OR: do we implement some low-level streaming protocol on top of WebSockets?
-        // Http/2 would be helpful here, but not supported yet (see: https://developers.cloudflare.com/workers/runtime-apis/nodejs/)
-        body: (await request.bytes()).toBase64(),
-        headers: serializeHeaders(request.headers),
-      } satisfies HttpRequestMessage);
-
-      return promise;
-    } else {
-      return notConnected();
+      // -> FWD it to the Local Worker via the tunnel
+      return this.local.fetch(request);
     }
+    return notConnected();
+  }
+
+  private async restoreWebSockets() {
+    this._counter = (await this.ctx.storage.get<number>("counter")) ?? 0;
+
+    this.ctx.getWebSockets().map((ws) => {
+      const attachment = ws.deserializeAttachment() as WebSocketAttachment;
+      if (attachment.type === "listen") {
+        this.local = {
+          fetch: (request) => fetch(attachment.tunnelUrl!, request),
+          send: (message) => ws.send(JSON.stringify(message)),
+        };
+      } else if (attachment.type === "call") {
+        this.calls.set(attachment.callId, ws);
+      }
+    });
+  }
+
+  async webSocketMessage(
+    ws: WebSocket,
+    _message: string | ArrayBuffer,
+  ): Promise<void> {
+    const message =
+      typeof _message === "string"
+        ? _message
+        : new TextDecoder().decode(_message);
+    const attachment = ws.deserializeAttachment() as WebSocketAttachment;
+    const data = JSON.parse(message) as RpcMessage;
+
+    if (attachment.type === "call") {
+      // mesage received from the Remote Worker sending a RPC call to the Local Worker
+
+      // forward messages to the Local Worker
+      this.local!.send(data);
+    } else if (attachment.type === "listen") {
+      // the Local Worker is sending a RpcMessage to the Remote Worker, so we just FWD it
+      if (this.calls.has(data.callId)) {
+        this.calls.get(data.callId)!.send(JSON.stringify(data));
+      } else {
+        console.warn("Unknown transaction ID", data.callId);
+      }
+    }
+  }
+
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+    wasClean: boolean,
+  ): Promise<void> {
+    const attachment = ws.deserializeAttachment() as WebSocketAttachment;
+    if (attachment.type === "call") {
+      this.calls.delete(attachment.callId);
+    } else if (attachment.type === "listen") {
+      this.local = undefined;
+    }
+  }
+
+  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+    // TODO(sam): should we do anything here?
+  }
+
+  /**
+   * Create a WebSocket pair and return a socket to be returned to the caller.
+   */
+  private webSocket(attachment: WebSocketAttachment) {
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    server.serializeAttachment(attachment);
+    this.ctx.acceptWebSocket(server);
+    return [client, server];
   }
 }
 
-const notConnected = () =>
+const notConnected = (message?: string) =>
   new Response(
-    "Local worker is not connected. Please connect the local worker to the live proxy first.",
+    message ||
+      "Local worker is not connected. Please connect the local worker to the live proxy first. ",
     { status: 409 },
   );
+
+type WebSocketAttachment =
+  | {
+      type: "listen";
+      tunnelUrl: string;
+    }
+  | {
+      type: "call";
+      callId: number;
+    };

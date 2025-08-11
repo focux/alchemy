@@ -3,7 +3,7 @@ type Handler<F extends (input: any, env: any, ctx: any) => any> = (
 ) => Promise<Awaited<ReturnType<F>>>;
 
 export type ProxiedHandler = {
-  [key in keyof Required<ExportedHandler<any>>]: Handler<
+  [key in keyof ExportedHandler<any>]: Handler<
     Required<ExportedHandler<any>>[key]
   >;
 };
@@ -21,64 +21,6 @@ export function isListenRequest(request: Request) {
 export function isCallRequest(request: Request) {
   return new URL(request.url).pathname === CALL_PATH;
 }
-
-export type HttpMessage = HttpRequestMessage | HttpResponseMessage;
-
-export type HttpMethod =
-  | "GET"
-  | "POST"
-  | "PUT"
-  | "DELETE"
-  | "PATCH"
-  | "OPTIONS"
-  | "HEAD";
-
-// encode HTTP headers as a list of key-value pairs (to account for duplicate headers)
-export type HttpHeaders = HttpHeader[];
-
-/** A key-value pair representing an HTTP header */
-export type HttpHeader = [string, string];
-
-export function serializeHeaders(headers: Headers): HttpHeaders {
-  const pairs: HttpHeaders = [];
-  headers.forEach((value, name) => {
-    // forEach iterates in insertion order and repeats duplicate names
-    pairs.push([name, value]);
-  });
-  return pairs;
-}
-
-export function deserializeHeaders(json: HttpHeaders): Headers {
-  return new Headers(json);
-}
-
-export type HttpRequestMessage = {
-  type: "http-request";
-  /** an ID uniquely identifying this individual HTTP request */
-  requestId: number;
-  /** the HTTP request method */
-  method: HttpMethod;
-  /** the HTTP request URL */
-  url: string;
-  /** the HTTP request body as a base64 encoded string */
-  body?: string;
-  /** the HTTP request headers */
-  headers: HttpHeaders;
-};
-
-export type HttpResponseMessage = {
-  type: "http-response";
-  /** an ID uniquely identifying this individual HTTP request */
-  requestId: number;
-  /** the HTTP response status code */
-  status: number;
-  /** the HTTP response status text */
-  statusText: string;
-  /** the HTTP response body */
-  body: string;
-  /** the HTTP response headers */
-  headers: HttpHeaders;
-};
 
 export type RpcMessage =
   | CallMessage

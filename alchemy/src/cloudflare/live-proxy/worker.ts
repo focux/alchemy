@@ -7,11 +7,13 @@ import {
   type ProxiedHandler,
 } from "./protocol.ts";
 
+// a singleton reference to the Coordinator DO server
 const server = once(() =>
   env.COORDINATOR.get(env.COORDINATOR.idFromName("default")),
 );
 
-const bridge = once(async () =>
+// sets up a bridge between the remote worker and the local worker (through a DO Cooridinator server)
+const bridge = once(() =>
   link<ProxiedHandler>({
     role: "client",
     token: env.SESSION_SECRET,
@@ -20,20 +22,20 @@ const bridge = once(async () =>
 );
 
 // Proxies a function call to a Local Worker through a central Coordinator DO.
-const local =
+const proxy =
   (prop: keyof ProxiedHandler) =>
   async (...args: any[]): Promise<any> =>
     (await bridge())[prop](...args);
 
 export default {
   // hooks called by the Cloudflare platform for push-based events
-  scheduled: local("scheduled"),
-  queue: local("queue"),
-  email: local("email"),
-  tail: local("tail"),
-  tailStream: local("tailStream"),
-  test: local("test"),
-  trace: local("trace"),
+  scheduled: proxy("scheduled"),
+  queue: proxy("queue"),
+  email: proxy("email"),
+  tail: proxy("tail"),
+  tailStream: proxy("tailStream"),
+  test: proxy("test"),
+  trace: proxy("trace"),
 
   // inbound requests from the public internet to the remote worker
   async fetch(request: Request): Promise<Response> {
@@ -53,6 +55,6 @@ export default {
         status: 404,
       });
     }
-    return server().fetch(request);
+    return await server().fetch(request);
   },
 } satisfies ExportedHandler<Env>;

@@ -18,12 +18,12 @@ export async function connect({
     Upgrade: "websocket",
     ...(token
       ? {
-          Authorization: typeof token === "string" ? token : token.unencrypted,
+          Authorization: `Bearer ${typeof token === "string" ? token : token.unencrypted}`,
         }
       : {}),
   };
   const response = await (typeof remote === "string" || remote instanceof URL
-    ? fetch(remote, {
+    ? fetch(`${remote.toString()}${path}`, {
         headers,
       })
     : remote.fetch(path, {
@@ -32,7 +32,7 @@ export async function connect({
 
   if (!response.ok || !response.webSocket) {
     throw new Error(
-      `Failed to open transaction: ${response.status} ${response.statusText}`,
+      `HTTP ${response.status} ${response.statusText}: ${await response.text()}`,
     );
   }
   return response.webSocket;

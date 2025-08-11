@@ -34,7 +34,7 @@ export async function link<F extends Functions>({
   remote: string | URL | DurableObjectStub | Fetcher;
   token?: string | Secret<string>;
   functions?: F;
-}): Promise<Link<F>> {
+}): Promise<Link<Required<F>>> {
   const socket = await connect({
     remote,
     token,
@@ -196,5 +196,5 @@ export async function link<F extends Functions>({
         });
         return promise;
       },
-  }) as Link<F>;
+  }) as Link<Required<F>>;
 }

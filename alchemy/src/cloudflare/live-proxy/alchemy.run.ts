@@ -1,8 +1,8 @@
 import alchemy from "alchemy";
 import { DurableObjectNamespace, Queue, Worker } from "alchemy/cloudflare";
 import { SQLiteStateStore } from "alchemy/state";
-import { link } from "../../alchemy/src/cloudflare/live-proxy/link.ts";
-import type { ProxiedHandler } from "../../alchemy/src/cloudflare/live-proxy/protocol.ts";
+import { link } from "./link.ts";
+import type { ProxiedHandler } from "./protocol.ts";
 
 const app = await alchemy("my-test-app", {
   stateStore: (scope) => new SQLiteStateStore(scope),
@@ -46,12 +46,12 @@ const client = await link<ProxiedHandler>({
       throw new Error("Not implemented");
     },
     async scheduled(event, ctx) {},
-    async queue(batch, ctx) {
+    async queue(batch: MessageBatch, ctx) {
       console.log(batch);
       batch.ackAll();
     },
     async test(controller, ctx) {},
-  },
+  } satisfies ProxiedHandler,
 });
 
 await app.finalize();
