@@ -928,7 +928,6 @@ const _Worker = Resource(
       : undefined;
     let result: PutWorkerResult;
 
-    console.log("watch", this.scope.watch);
     if (this.scope.watch) {
       const controller = new AbortController();
       result = await watchWorker(api, props, {
@@ -1254,7 +1253,6 @@ const watchWorker = async <B extends Bindings>(
     controller: AbortController;
   },
 ) => {
-  console.log("watchWorker", input.id);
   const promise = new DeferredPromise<PutWorkerResult>();
   const run = async () => {
     for await (const bundle of input.bundle.watch(input.controller.signal)) {

@@ -39,11 +39,13 @@ export default {
 
   // inbound requests from the public internet to the remote worker
   async fetch(request: Request): Promise<Response> {
-    console.log("HELLLOOOO");
+    const url = new URL(request.url);
     if (isListenRequest(request)) {
       // a special request that a Local Worker makes to establish a connection to the Coordinator
-      const auth = request.headers.get("Authorization");
-      if (auth !== `Bearer ${env.SESSION_SECRET}`) {
+      const auth =
+        request.headers.get("Authorization")?.replace("Bearer ", "") ??
+        url.searchParams.get("authToken");
+      if (auth !== env.SESSION_SECRET) {
         return new Response("Unauthorized", { status: 401 });
       }
       const upgrade = request.headers.get("Upgrade");
@@ -61,6 +63,10 @@ export default {
         status: 404,
       });
     }
-    return server().fetch(request);
+    const response = await server().fetch(request);
+    console.log(
+      `WebSocket: ${response.status} ${response.webSocket === undefined}`,
+    );
+    return response;
   },
 } satisfies ExportedHandler<Env>;

@@ -9,7 +9,6 @@ const app = await alchemy("my-test-app", {
   stateStore: (scope) => new SQLiteStateStore(scope),
   password: "placeholder",
 });
-console.log("watch", app.watch);
 
 const token = alchemy.secret("placeholder");
 
@@ -37,21 +36,20 @@ const proxy = await Worker("live-proxy", {
   },
 });
 
-console.log(proxy.url);
-
 await queue.send({
   body: "Hello, world!",
 });
 
-const tunnelUrl = await tunnel();
+const { tunnelUrl, localUrl } = await tunnel();
 
-console.log({ tunnelUrl });
+await new Promise((resolve) => setTimeout(resolve, 1000));
 
 const client = await link<ProxiedHandler>({
   role: "server",
   remote: proxy.url!,
   token,
   tunnelUrl,
+  localUrl,
   functions: {
     async email(message, ctx) {},
     async fetch(request, ctx) {

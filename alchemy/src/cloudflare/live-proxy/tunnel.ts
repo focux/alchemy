@@ -37,7 +37,11 @@ export async function tunnel(url = "http://localhost:8080") {
     // No PID file or couldn't read it
   }
 
-  const { promise, resolve, reject } = Promise.withResolvers<string>();
+  const { promise, resolve, reject } = Promise.withResolvers<{
+    tunnelUrl: string;
+    localUrl: string;
+    pid: number;
+  }>();
 
   const proc = spawn("cloudflared", ["tunnel", "--url", url]);
 
@@ -62,7 +66,7 @@ export async function tunnel(url = "http://localhost:8080") {
           JSON.stringify({ pid: proc.pid, url: tunnelUrl }, null, 2),
         );
       }
-      resolve(tunnelUrl);
+      resolve({ tunnelUrl, localUrl: url, pid: proc.pid! });
     }
   });
 

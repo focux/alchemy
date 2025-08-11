@@ -29,6 +29,7 @@ export class Server extends DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
     // the DO only accepts web socket connections
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Upgrade required", { status: 426 });
@@ -39,14 +40,11 @@ export class Server extends DurableObject {
       if (this.local) {
         return new Response("Already connected", { status: 409 });
       }
-      // we expect the Local Worker to know its tunnel URL and provide it to us when it connects
-      const body = await request.text();
-      console.log({ body });
-      const { tunnelUrl } = JSON.parse(body) as {
-        tunnelUrl: string;
-      };
+      const tunnelUrl = url.searchParams.get("tunnelUrl");
       if (!tunnelUrl) {
-        return new Response("Missing tunnel URL", { status: 400 });
+        return new Response("Missing tunnelUrl query parameter", {
+          status: 400,
+        });
       }
       const [client, server] = this.webSocket({
         type: "listen",

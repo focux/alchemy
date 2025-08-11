@@ -269,7 +269,6 @@ export async function Queue<T = unknown>(
         await handleApiError(response, "sending", "Message", queue.id);
       }
       // TODO(sam): handle partial failures (re-drive messages)
-      console.log(await response.json());
     },
   } as Queue<T>;
 }

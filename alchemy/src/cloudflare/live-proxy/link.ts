@@ -30,12 +30,14 @@ export async function link<F extends Functions>({
   token,
   functions,
   tunnelUrl,
+  localUrl,
 }: {
   role: "server" | "client";
   remote: string | URL | DurableObjectStub | Fetcher;
   token?: string | Secret<string>;
   functions?: F;
   tunnelUrl?: string;
+  localUrl?: string;
 }): Promise<Link<Required<F>>> {
   const socket = await connect({
     remote,
@@ -45,6 +47,12 @@ export async function link<F extends Functions>({
       tunnelUrl,
     },
   });
+  if (role === "server") {
+    console.log(`Live Dev Proxy is connected:
+🌎 Remote - ${remote}
+🔗 Tunnel - ${tunnelUrl}
+🖥️  Local  - ${localUrl}`);
+  }
 
   let callInc = 0;
   const callbacks: {
@@ -136,70 +144,58 @@ export async function link<F extends Functions>({
     }
   });
 
-  const { promise: isOpen, resolve, reject } = Promise.withResolvers<void>();
-
-  socket.addEventListener("open", () => {
-    // bi-directional connection is established between the Worker<->Coordinator<->Local
-    // it is now safe to trigger the local worker to execute the function
-    resolve();
-  });
-
-  socket.addEventListener("close", () => {});
-
-  socket.addEventListener("error", () => {
-    reject(new Error("Connection error"));
-  });
-
   return new Proxy(functions ?? {}, {
-    get:
-      (_, functionId: Extract<keyof F, string>) =>
-      async (...args: any[]) => {
-        await isOpen;
+    get: (_, functionId: Extract<keyof F, string>) =>
+      functionId === "then" // don't masquerade as a Promise
+        ? undefined
+        : async (...args: any[]) => {
+            const { promise, resolve, reject } = Promise.withResolvers<any>();
 
-        const { promise, resolve, reject } = Promise.withResolvers<any>();
+            const callId = callInc++;
+            const call = (callbacks[callId] = {
+              resolve,
+              reject,
+              functions: {} as {
+                [id: number]: (...args: any[]) => any;
+              },
+            });
+            let funcInc = 0;
 
-        const callId = callInc++;
-        const call = (callbacks[callId] = {
-          resolve,
-          reject,
-          functions: {} as {
-            [id: number]: (...args: any[]) => any;
+            send({
+              type: "call",
+              callId,
+              functionId,
+              args: (function proxy(obj: any): any {
+                if (!obj) {
+                  return obj;
+                } else if (typeof obj === "function") {
+                  if (typeof obj.waitUntil === "function") {
+                    const _ctx: ExecutionContext = obj;
+                    // TODO(sam): we need to handle waitUntil differently (coordinate waiting for promises)
+                    _ctx.passThroughOnException;
+                    _ctx.waitUntil;
+                    _ctx.props;
+                  }
+                  const id = funcInc++;
+                  call.functions[id] = obj;
+                  return {
+                    "Symbol(alchemy::RPC)": id,
+                  };
+                } else if (Array.isArray(obj)) {
+                  return obj.map(proxy);
+                } else if (typeof obj === "object") {
+                  return Object.fromEntries(
+                    Object.entries(obj).map(([key, value]) => [
+                      key,
+                      proxy(value),
+                    ]),
+                  );
+                } else {
+                  return obj;
+                }
+              })(args),
+            });
+            return promise;
           },
-        });
-        let funcInc = 0;
-
-        send({
-          type: "call",
-          callId,
-          functionId,
-          args: (function proxy(obj: any): any {
-            if (!obj) {
-              return obj;
-            } else if (typeof obj === "function") {
-              if (typeof obj.waitUntil === "function") {
-                const _ctx: ExecutionContext = obj;
-                // TODO(sam): we need to handle waitUntil differently (coordinate waiting for promises)
-                _ctx.passThroughOnException;
-                _ctx.waitUntil;
-                _ctx.props;
-              }
-              const id = funcInc++;
-              call.functions[id] = obj;
-              return {
-                "Symbol(alchemy::RPC)": id,
-              };
-            } else if (Array.isArray(obj)) {
-              return obj.map(proxy);
-            } else if (typeof obj === "object") {
-              return Object.fromEntries(
-                Object.entries(obj).map(([key, value]) => [key, proxy(value)]),
-              );
-            } else {
-              return obj;
-            }
-          })(args),
-        });
-        return promise;
-      },
   }) as Link<Required<F>>;
 }
