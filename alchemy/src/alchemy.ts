@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { execArgv } from "node:process";
 import { onExit } from "signal-exit";
 import { ReplacedSignal } from "./apply.ts";
 import { DestroyStrategy, DestroyedSignal, destroy } from "./destroy.ts";
@@ -140,7 +141,7 @@ async function _alchemy(
           ? "read"
           : "up",
       local: cliArgs.includes("--local") || cliArgs.includes("--dev"),
-      watch: cliArgs.includes("--watch"),
+      watch: cliArgs.includes("--watch") || execArgv.includes("--watch"),
       quiet: cliArgs.includes("--quiet"),
       force: cliArgs.includes("--force"),
       // Parse stage argument (--stage my-stage) functionally and inline as a property declaration
