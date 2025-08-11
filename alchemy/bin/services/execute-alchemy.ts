@@ -79,7 +79,10 @@ export async function execAlchemy(
   if (force) args.push("--force");
   if (stage) args.push(`--stage ${stage}`);
   if (destroy) args.push("--destroy");
-  if (watch) execArgs.push("--watch");
+  if (watch) {
+    execArgs.push("--watch");
+    args.push("--watch");
+  }
   if (envFile) execArgs.push(`--env-file ${envFile}`);
   if (dev) args.push("--dev");
 

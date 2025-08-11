@@ -1,3 +1,15 @@
+## v0.60.1
+
+### &nbsp;&nbsp;&nbsp;🐞 Bug Fixes
+
+- **cloudflare**:
+  - Propagate compatibility preset to wrangler.jsonc &nbsp;-&nbsp; by **John Royal** in https://github.com/sam-goodwin/alchemy/issues/835 [<samp>(6535d)</samp>](https://github.com/sam-goodwin/alchemy/commit/6535deb)
+  - Overwrite NODE_ENV when running vite dev &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/832 [<samp>(edcca)</samp>](https://github.com/sam-goodwin/alchemy/commit/edcca4a)
+
+##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/sam-goodwin/alchemy/compare/v0.60.0...v0.60.1)
+
+---
+
 ## v0.60.0
 
 ### &nbsp;&nbsp;&nbsp;🚀 Features
