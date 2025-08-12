@@ -11,8 +11,6 @@ export class CoreCDPServer {
   private rootCDPResolve?: () => void;
   private debuggerPromise: Promise<void>;
   private debuggerResolve?: () => void;
-  // When true, we will pause the inspector immediately and only resolve
-  // waitForDebugger after a client resumes execution.
   private waitingForDebugger = false;
   private port?: number;
   private rootCDPUrl?: string;
@@ -23,13 +21,11 @@ export class CoreCDPServer {
   constructor() {
     this.logDirectory = path.join(process.cwd(), ".alchemy", "logs");
 
-    // Delete and recreate logs directory
     if (fs.existsSync(this.logDirectory)) {
       fs.rmSync(this.logDirectory, { recursive: true, force: true });
     }
     fs.mkdirSync(this.logDirectory, { recursive: true });
 
-    // Initialize the promise for waiting for root CDP
     this.rootCDPPromise = new Promise((resolve) => {
       this.rootCDPResolve = resolve;
     });
@@ -37,17 +33,14 @@ export class CoreCDPServer {
       this.debuggerResolve = resolve;
     });
 
-    // 1. Create server
     this.server = createServer((req, res) => {
       this.handleRequest(req, res);
     });
 
-    // Handle WebSocket upgrades for CDP connections
     this.server.on("upgrade", (request, socket, head) => {
       this.handleUpgrade(request, socket, head);
     });
 
-    // 2. Start server
     this.startServer();
   }
 
@@ -55,17 +48,13 @@ export class CoreCDPServer {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     this.port = await findOpenPort();
     this.url = `http://localhost:${this.port}`;
-    this.server.listen(this.port, () => {
-      console.log(`CDP Server started at ${this.url}`);
-    });
+    this.server.listen(this.port, () => {});
   }
 
   private handleRequest(req: any, res: any): void {
     const url = new URL(req.url, this.url);
 
-    // 4. Register root CDP endpoint
     if (url.pathname === "/register-root-cdp" && req.method === "POST") {
-      // Parse request body to get the WebSocket URL
       let body = "";
       req.on("data", (chunk: any) => {
         body += chunk.toString();
@@ -84,90 +73,72 @@ export class CoreCDPServer {
       return;
     }
 
-    // Default response for unknown endpoints
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
   }
 
   private handleUpgrade(request: any, socket: any, head: any): void {
     try {
-      logger.log(
-        `[CoreCDPServer] Handling upgrade request for: ${request.url}`,
-      );
       const url = new URL(request.url, this.url);
-      logger.log(`[CoreCDPServer] Parsed URL pathname: ${url.pathname}`);
 
-      // Check if this is a request to /servers/<name>
       const match = url.pathname.match(/^\/servers\/(.+)$/);
       if (match) {
         const serverName = match[1];
-        logger.log(`[CoreCDPServer] Looking for CDP server: ${serverName}`);
-        logger.log(
-          `[CoreCDPServer] Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
-        );
 
         const cdpServer = this.cdpServers.get(serverName);
 
         if (cdpServer) {
-          logger.log(
-            `[CoreCDPServer] Found CDP server ${serverName}, forwarding upgrade`,
-          );
-          // Forward the upgrade to the CDP server's WebSocket server
           cdpServer.handleUpgrade(request, socket, head);
         } else {
-          logger.warn(
-            `[CoreCDPServer] CDP server ${serverName} not found, destroying socket`,
-          );
+          logger.task("DebugServer", {
+            message: `CDP server ${serverName} not found, destroying socket. Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
+            status: "failure",
+            prefixColor: "magenta",
+          });
           socket.destroy();
         }
       } else {
-        logger.warn(
-          `[CoreCDPServer] Invalid path ${url.pathname}, destroying socket`,
-        );
         socket.destroy();
       }
     } catch (error) {
-      logger.error("[CoreCDPServer] Error handling upgrade:", error);
+      logger.task("DebugServer", {
+        message: `Error handling upgrade: ${error}`,
+        status: "failure",
+        prefixColor: "magenta",
+      });
       socket.destroy();
     }
   }
 
   public registerRootCDP(wsUrl: string): void {
-    logger.log(`[CoreCDPServer] Registering root CDP with URL: ${wsUrl}`);
     this.rootCDPUrl = wsUrl;
     const rootCDP = new CDPProxy(wsUrl, {
       name: "alchemy",
       server: this.server,
       domains: new Set(["Inspector", "Console", "Runtime", "Debugger"]),
       shouldPauseOnOpen: () => this.waitingForDebugger,
-      // When in pause-wait mode, resolve after resume; otherwise, use idle detection
       waitMode: this.waitingForDebugger ? "pause" : "idle",
       onDebuggerConnected: () => {
         if (!this.waitingForDebugger && this.debuggerResolve) {
           this.debuggerResolve();
         }
       },
-      onDebuggerPaused: () => {
-        logger.log(`[${"alchemy"}] Debugger paused (startup)`);
-      },
-      onDebuggerResumed: () => {
-        if (this.waitingForDebugger && this.debuggerResolve) {
-          logger.log(`[${"alchemy"}] Debugger resumed; continuing startup`);
-          this.waitingForDebugger = false;
-          this.debuggerResolve();
-        }
-      },
     });
 
-    // Store the CDP server in the map
-    this.cdpServers.set("alchemy", rootCDP);
-    logger.log(
-      `[CoreCDPServer] Root CDP registered. Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
-    );
+    this.registerCDPServer("alchemy", rootCDP);
 
     if (this.rootCDPResolve) {
       this.rootCDPResolve();
     }
+  }
+
+  private registerCDPServer(name: string, server: CDPServer) {
+    this.cdpServers.set(name, server);
+    logger.task("DebugServer", {
+      message: `CDP server ${name} registered. Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
+      status: "success",
+      prefixColor: "magenta",
+    });
   }
 
   public async waitForRootCDP(): Promise<void> {
@@ -175,7 +146,6 @@ export class CoreCDPServer {
   }
 
   public async waitForDebugger(): Promise<void> {
-    // Switch to pause-wait mode until a client resumes execution
     this.waitingForDebugger = true;
     return this.debuggerPromise;
   }
@@ -205,8 +175,6 @@ export abstract class CDPServer {
   private lastClient: WsWebSocket | null = null;
   private waitMode: WaitMode;
   private onDebuggerConnected?: () => void;
-  private onDebuggerPaused?: () => void;
-  private onDebuggerResumed?: () => void;
 
   constructor(options: {
     name: string;
@@ -214,13 +182,9 @@ export abstract class CDPServer {
     logFile?: string;
     domains?: Set<string>;
     onDebuggerConnected?: () => void;
-    onDebuggerPaused?: () => void;
-    onDebuggerResumed?: () => void;
     waitMode?: WaitMode;
-    // When provided and waitMode === "pause", send Debugger.enable/pause on open
     shouldPauseOnOpen?: () => boolean;
   }) {
-    logger.log(`[CDPServer] Creating CDP server: ${options.name}`);
     this.domains = options.domains ?? new Set(["Console"]);
     this.logFile =
       options.logFile ??
@@ -228,66 +192,23 @@ export abstract class CDPServer {
     this.name = options.name;
     this.waitMode = options.waitMode ?? "idle";
     this.onDebuggerConnected = options.onDebuggerConnected;
-    this.onDebuggerPaused = options.onDebuggerPaused;
-    this.onDebuggerResumed = options.onDebuggerResumed;
     fs.writeFileSync(this.logFile, "");
-    logger.log(`[CDPServer] Initializing WebSocket server for: ${this.name}`);
     this.wss = new WebSocketServer({
-      noServer: true, // Don't automatically handle upgrades
+      noServer: true,
     });
 
     this.wss.on("connection", async (clientWs) => {
-      logger.log(`[${this.name}] New WebSocket connection established`);
       this.lastClient = clientWs;
 
-      let debuggerConnectedTimeout: NodeJS.Timeout | null = null;
-
       if (this.waitMode === "idle") {
-        const startTimer = () => {
-          if (debuggerConnectedTimeout) {
-            clearTimeout(debuggerConnectedTimeout);
-          }
-          debuggerConnectedTimeout = setTimeout(() => {
-            logger.log(
-              `[${this.name}] No messages for 25ms, calling onDebuggerConnected`,
-            );
-            this.onDebuggerConnected?.();
-          }, 25);
-        };
-
-        const resetTimer = () => {
-          startTimer();
-        };
-
-        const clearTimer = () => {
-          if (debuggerConnectedTimeout) {
-            clearTimeout(debuggerConnectedTimeout);
-            debuggerConnectedTimeout = null;
-          }
-        };
-
-        // Start the initial timer
-        startTimer();
-
-        clientWs.on("message", async (data) => {
-          resetTimer();
-          await this.handleClientMessage(clientWs, data.toString());
-        });
-
-        clientWs.on("close", () => {
-          logger.log(`[${this.name}] Client closed`);
-          clearTimer();
-        });
-      } else {
-        // pause mode: no idle timer, just forward messages
-        clientWs.on("message", async (data) => {
-          await this.handleClientMessage(clientWs, data.toString());
-        });
-
-        clientWs.on("close", () => {
-          logger.log(`[${this.name}] Client closed`);
-        });
+        this.onDebuggerConnected?.();
       }
+
+      clientWs.on("message", async (data) => {
+        await this.handleClientMessage(clientWs, data.toString());
+      });
+
+      clientWs.on("close", () => {});
     });
   }
 
@@ -299,14 +220,7 @@ export abstract class CDPServer {
       if (messageDomain != null && !this.domains.has(messageDomain)) {
         return;
       }
-      // Detect pause/resume events in pause mode
-      if (this.waitMode === "pause" && typeof message.method === "string") {
-        if (message.method === "Debugger.paused") {
-          this.onDebuggerPaused?.();
-        } else if (message.method === "Debugger.resumed") {
-          this.onDebuggerResumed?.();
-        }
-      }
+
       if (message.id == null) {
         await fs.promises.appendFile(this.logFile, `${data}\n`);
       }
@@ -314,8 +228,10 @@ export abstract class CDPServer {
         this.lastClient.send(data);
       }
     } catch (error) {
-      console.error(error);
-      console.log(data);
+      logger.error(
+        `[${this.name}:Debug] Error handling inspector message:`,
+        error,
+      );
     }
   }
 
@@ -323,15 +239,18 @@ export abstract class CDPServer {
 
   public handleUpgrade(request: any, socket: any, head: any): void {
     try {
-      logger.log(`[${this.name}] Handling WebSocket upgrade`);
+      logger.log(`[${this.name}:Debug] Handling WebSocket upgrade`);
       this.wss.handleUpgrade(request, socket, head, (ws) => {
         logger.log(
-          `[${this.name}] WebSocket upgrade successful, emitting connection`,
+          `[${this.name}:Debug] WebSocket upgrade successful, emitting connection`,
         );
         this.wss.emit("connection", ws, request);
       });
     } catch (error) {
-      logger.error(`[${this.name}] Error during WebSocket upgrade:`, error);
+      logger.error(
+        `[${this.name}:Debug] Error during WebSocket upgrade:`,
+        error,
+      );
       socket.destroy();
     }
   }
@@ -353,7 +272,6 @@ export class CDPProxy extends CDPServer {
   }
 
   async handleClientMessage(_ws: WsWebSocket, data: string): Promise<void> {
-    logger.log(`[${this.name}] Client message:`, data);
     this.inspectorWs.send(data);
   }
 
@@ -363,18 +281,17 @@ export class CDPProxy extends CDPServer {
     };
 
     this.inspectorWs.onclose = () => {
-      logger.warn(`[${this.name}] Inspector closed`);
+      logger.warn(`[${this.name}:Debug] Inspector closed`);
     };
 
     this.inspectorWs.onerror = (error) => {
-      logger.error(`[${this.name}] Inspector errored:`, error);
+      logger.error(`[${this.name}:Debug] Inspector errored:`, error);
     };
 
     this.inspectorWs.onopen = async () => {
-      logger.log(`[${this.name}] Inspector opened`);
+      logger.log(`[${this.name}:Debug] Inspector opened`);
       try {
         if (this.shouldPauseOnOpen?.()) {
-          // Enable debugger and pause immediately so breakpoints can bind
           const enableMsg = JSON.stringify({
             id: ++this.internalMsgId,
             method: "Debugger.enable",
@@ -390,7 +307,7 @@ export class CDPProxy extends CDPServer {
           this.inspectorWs?.send(pauseMsg);
         }
       } catch (err) {
-        logger.error(`[${this.name}] Failed to send initial pause`, err);
+        logger.error(`[${this.name}:Debug] Failed to send initial pause`, err);
       }
     };
   }
