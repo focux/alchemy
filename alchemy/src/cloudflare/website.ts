@@ -436,9 +436,9 @@ async function runDevCommand(
   await fs.writeFile(logFile, ""); // Create empty log file
 
   // Use shell to pipe output to both log file and stdout/stderr
-  const shellCommand = `${props.command} 2>&1 | tee "${logFile}"`;
+  const out = await fs.open(logFile, "a");
 
-  const childProcess = spawn(shellCommand, {
+  const childProcess = spawn(props.command, {
     cwd: props.cwd,
     shell: true,
     env: {
@@ -459,7 +459,7 @@ async function runDevCommand(
       // which breaks `vite dev` (it won't, for example, re-write `process.env.TSS_APP_BASE` in the `.js` client side bundle)
       NODE_ENV: "development",
     },
-    stdio: "pipe",
+    stdio: ["ignore", out.fd, out.fd],
   });
   await once(childProcess, "spawn");
 
@@ -470,8 +470,11 @@ async function runDevCommand(
         once(childProcess, "exit"),
         new Promise((resolve) => setTimeout(resolve, 5000)),
       ]);
-      if (!childProcess.killed) {
+      console.log("Killed process", childProcess.pid, childProcess.exitCode);
+      if (childProcess.exitCode === null) {
         childProcess.kill("SIGKILL");
+      } else {
+        await fs.unlink(persistFile).catch(() => {});
       }
     }
   });
@@ -482,8 +485,8 @@ async function runDevCommand(
     /http:\/\/(?:(?:localhost|0\.0\.0\.0|127\.0\.0\.1)|(?:\d{1,3}\.){3}\d{1,3}):\d+(?:\/)?/;
   const promise = new DeferredPromise<string>();
 
-  // Monitor stdout for URL
-  childProcess.stdout.on("data", (data) => {
+  const tail = spawn("tail", ["-f", logFile], { stdio: "pipe" });
+  tail.stdout.on("data", (data) => {
     if (promise.status === "pending") {
       const match = data
         .toString()
@@ -495,9 +498,11 @@ async function runDevCommand(
     }
     process.stdout.write(data);
   });
-
-  childProcess.stderr.on("data", (data) => {
+  tail.stderr.on("data", (data) => {
     process.stderr.write(data);
+  });
+  scope.onCleanup(async () => {
+    tail.kill("SIGTERM");
   });
 
   return await Promise.race([
@@ -511,7 +516,7 @@ async function runDevCommand(
 }
 
 const waitForExit = async (pid: number) => {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 5; i++) {
     if (!isProcessRunning(pid)) {
       return true;
     }
