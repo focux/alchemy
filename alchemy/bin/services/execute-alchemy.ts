@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { resolve } from "node:path";
 import pc from "picocolors";
-import { onExit } from "signal-exit";
 import z from "zod";
 import { detectRuntime } from "../../src/util/detect-node-runtime.ts";
 import { detectPackageManager } from "../../src/util/detect-package-manager.ts";
@@ -152,24 +151,23 @@ export async function execAlchemy(
           break;
       }
   }
-
-  onExit((_, signal) => {
-    if (child.exitCode === null) {
-      child.kill(signal ?? "SIGINT");
-      return true;
-    }
+  process.on("SIGINT", async () => {
+    await exitPromise;
+    process.exit(child.exitCode ?? 0);
   });
+
   console.log(command);
   const [cmd, ...cmdArgs] = command.split(" ");
   const child = spawn(cmd, cmdArgs, {
     cwd,
+    shell: true,
     stdio: "inherit",
     env: {
       ...process.env,
       FORCE_COLOR: "1",
     },
-    detached: true,
   });
-  await once(child, "exit");
-  process.exit(child.exitCode === 130 ? 0 : (child.exitCode ?? 0));
+  const exitPromise = once(child, "exit");
+  await exitPromise.catch(() => {});
+  process.exit(child.exitCode ?? 0);
 }
