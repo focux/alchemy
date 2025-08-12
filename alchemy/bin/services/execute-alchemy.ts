@@ -1,5 +1,6 @@
 import { log } from "@clack/prompts";
-import { execa } from "execa";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { resolve } from "node:path";
 import pc from "picocolors";
 import { onExit } from "signal-exit";
@@ -152,41 +153,25 @@ export async function execAlchemy(
       }
   }
 
-  const controller = new AbortController();
-  process.on("beforeExit", () => {
+  onExit((_, signal) => {
     if (child.exitCode === null) {
-      console.log("Killing child", child.pid);
-      child.kill("SIGKILL");
-    }
-  });
-  onExit(() => {
-    if (!controller.signal.aborted) {
-      controller.abort();
+      console.log("Killing child", child.pid, signal);
+      child.kill(signal ?? "SIGINT");
       return true;
     }
   });
   console.log(command);
-  const child = execa(command, {
+  const [cmd, ...cmdArgs] = command.split(" ");
+  const child = spawn(cmd, cmdArgs, {
     cwd,
-    shell: true,
     stdio: "inherit",
     env: {
       ...process.env,
       FORCE_COLOR: "1",
     },
-    cancelSignal: controller.signal,
     detached: true,
-    reject: false,
   });
-  const result = await child;
-  if (result.failed && !controller.signal.aborted) {
-    log.error(pc.red(`Deploy failed: ${result.message}`));
-    if (result.stdout) {
-      console.log(result.stdout);
-    }
-    if (result.stderr) {
-      console.error(result.stderr);
-    }
-  }
-  process.exit(result.exitCode ?? 0);
+  const exitPromise = once(child, "exit");
+  await exitPromise;
+  process.exit(child.exitCode === 130 ? 0 : (child.exitCode ?? 0));
 }
