@@ -195,16 +195,33 @@ async function _alchemy(
 
       // Add delay using stage.run() to preserve context
       await stage.run(async () => {
-        // await new Promise((resolve) => setTimeout(resolve, 1000));
         const cdpServer = new CoreCDPServer();
-        console.log("WAITING FOR DEBUGGER");
         if (mergedOptions?.waitForRootCDPServer) {
+          logger.task("DebugServer", {
+            message: "Waiting for debug server to connect",
+            status: "pending",
+            prefixColor: "magenta",
+          });
           await cdpServer.waitForRootCDP();
+          logger.task("DebugServer", {
+            message: "Debug server connected",
+            status: "success",
+            prefixColor: "magenta",
+          });
         }
         if (mergedOptions?.waitForDebugger) {
+          logger.task("DebugServer", {
+            message: "Waiting for debugger",
+            status: "pending",
+            prefixColor: "magenta",
+          });
           await cdpServer.waitForDebugger();
+          logger.task("DebugServer", {
+            message: "Debugger connected",
+            status: "success",
+            prefixColor: "magenta",
+          });
         }
-        console.log("FINISHED WAITING FOR DEBUGGER");
       });
     } catch {
       // we are in Cloudflare Workers, we will emulate the enterWith behavior
@@ -413,7 +430,7 @@ export interface AlchemyOptions {
    */
   logger?: LoggerApi;
   /**
-   * Determines if alchemy should wait for a root CDP server to connect before deploying resources
+   * Determines if alchemy should wait for a root Chrome DevTools Protocol server to connect before deploying resources
    *
    * @default false
    */
