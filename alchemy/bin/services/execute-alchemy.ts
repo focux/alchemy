@@ -171,7 +171,6 @@ export async function execAlchemy(
     },
     detached: true,
   });
-  const exitPromise = once(child, "exit");
-  await exitPromise;
+  await once(child, "exit");
   process.exit(child.exitCode === 130 ? 0 : (child.exitCode ?? 0));
 }
