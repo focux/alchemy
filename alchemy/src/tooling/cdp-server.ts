@@ -11,6 +11,9 @@ export class CoreCDPServer {
   private rootCDPResolve?: () => void;
   private debuggerPromise: Promise<void>;
   private debuggerResolve?: () => void;
+  // When true, we will pause the inspector immediately and only resolve
+  // waitForDebugger after a client resumes execution.
+  private waitingForDebugger = false;
   private port?: number;
   private rootCDPUrl?: string;
   private url?: string;
@@ -136,9 +139,21 @@ export class CoreCDPServer {
       name: "alchemy",
       server: this.server,
       domains: new Set(["Inspector", "Console", "Runtime", "Debugger"]),
-      //todo(michael): UGHHH GROSS
+      shouldPauseOnOpen: () => this.waitingForDebugger,
+      // When in pause-wait mode, resolve after resume; otherwise, use idle detection
+      waitMode: this.waitingForDebugger ? "pause" : "idle",
       onDebuggerConnected: () => {
-        if (this.debuggerResolve) {
+        if (!this.waitingForDebugger && this.debuggerResolve) {
+          this.debuggerResolve();
+        }
+      },
+      onDebuggerPaused: () => {
+        logger.log(`[${"alchemy"}] Debugger paused (startup)`);
+      },
+      onDebuggerResumed: () => {
+        if (this.waitingForDebugger && this.debuggerResolve) {
+          logger.log(`[${"alchemy"}] Debugger resumed; continuing startup`);
+          this.waitingForDebugger = false;
           this.debuggerResolve();
         }
       },
@@ -160,6 +175,8 @@ export class CoreCDPServer {
   }
 
   public async waitForDebugger(): Promise<void> {
+    // Switch to pause-wait mode until a client resumes execution
+    this.waitingForDebugger = true;
     return this.debuggerPromise;
   }
 
@@ -178,12 +195,18 @@ export class CoreCDPServer {
 
 import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
 
+export type WaitMode = "idle" | "pause";
+
 export abstract class CDPServer {
   private logFile: string;
   protected domains: Set<string>;
   protected name: string;
   private wss: WebSocketServer;
   private lastClient: WsWebSocket | null = null;
+  private waitMode: WaitMode;
+  private onDebuggerConnected?: () => void;
+  private onDebuggerPaused?: () => void;
+  private onDebuggerResumed?: () => void;
 
   constructor(options: {
     name: string;
@@ -191,6 +214,11 @@ export abstract class CDPServer {
     logFile?: string;
     domains?: Set<string>;
     onDebuggerConnected?: () => void;
+    onDebuggerPaused?: () => void;
+    onDebuggerResumed?: () => void;
+    waitMode?: WaitMode;
+    // When provided and waitMode === "pause", send Debugger.enable/pause on open
+    shouldPauseOnOpen?: () => boolean;
   }) {
     logger.log(`[CDPServer] Creating CDP server: ${options.name}`);
     this.domains = options.domains ?? new Set(["Console"]);
@@ -198,6 +226,10 @@ export abstract class CDPServer {
       options.logFile ??
       path.join(process.cwd(), ".alchemy", "logs", `${options.name}.log`);
     this.name = options.name;
+    this.waitMode = options.waitMode ?? "idle";
+    this.onDebuggerConnected = options.onDebuggerConnected;
+    this.onDebuggerPaused = options.onDebuggerPaused;
+    this.onDebuggerResumed = options.onDebuggerResumed;
     fs.writeFileSync(this.logFile, "");
     logger.log(`[CDPServer] Initializing WebSocket server for: ${this.name}`);
     this.wss = new WebSocketServer({
@@ -210,41 +242,52 @@ export abstract class CDPServer {
 
       let debuggerConnectedTimeout: NodeJS.Timeout | null = null;
 
-      const startTimer = () => {
-        if (debuggerConnectedTimeout) {
-          clearTimeout(debuggerConnectedTimeout);
-        }
-        debuggerConnectedTimeout = setTimeout(() => {
-          logger.log(
-            `[${this.name}] No messages for 25ms, calling onDebuggerConnected`,
-          );
-          options.onDebuggerConnected?.();
-        }, 25);
-      };
+      if (this.waitMode === "idle") {
+        const startTimer = () => {
+          if (debuggerConnectedTimeout) {
+            clearTimeout(debuggerConnectedTimeout);
+          }
+          debuggerConnectedTimeout = setTimeout(() => {
+            logger.log(
+              `[${this.name}] No messages for 25ms, calling onDebuggerConnected`,
+            );
+            this.onDebuggerConnected?.();
+          }, 25);
+        };
 
-      const resetTimer = () => {
+        const resetTimer = () => {
+          startTimer();
+        };
+
+        const clearTimer = () => {
+          if (debuggerConnectedTimeout) {
+            clearTimeout(debuggerConnectedTimeout);
+            debuggerConnectedTimeout = null;
+          }
+        };
+
+        // Start the initial timer
         startTimer();
-      };
 
-      const clearTimer = () => {
-        if (debuggerConnectedTimeout) {
-          clearTimeout(debuggerConnectedTimeout);
-          debuggerConnectedTimeout = null;
-        }
-      };
+        clientWs.on("message", async (data) => {
+          resetTimer();
+          await this.handleClientMessage(clientWs, data.toString());
+        });
 
-      // Start the initial timer
-      startTimer();
+        clientWs.on("close", () => {
+          logger.log(`[${this.name}] Client closed`);
+          clearTimer();
+        });
+      } else {
+        // pause mode: no idle timer, just forward messages
+        clientWs.on("message", async (data) => {
+          await this.handleClientMessage(clientWs, data.toString());
+        });
 
-      clientWs.on("message", async (data) => {
-        resetTimer();
-        await this.handleClientMessage(clientWs, data.toString());
-      });
-
-      clientWs.on("close", () => {
-        logger.log(`[${this.name}] Client closed`);
-        clearTimer();
-      });
+        clientWs.on("close", () => {
+          logger.log(`[${this.name}] Client closed`);
+        });
+      }
     });
   }
 
@@ -255,6 +298,14 @@ export abstract class CDPServer {
       //todo(michael): this check is messy and doesn't work well for responses
       if (messageDomain != null && !this.domains.has(messageDomain)) {
         return;
+      }
+      // Detect pause/resume events in pause mode
+      if (this.waitMode === "pause" && typeof message.method === "string") {
+        if (message.method === "Debugger.paused") {
+          this.onDebuggerPaused?.();
+        } else if (message.method === "Debugger.resumed") {
+          this.onDebuggerResumed?.();
+        }
       }
       if (message.id == null) {
         await fs.promises.appendFile(this.logFile, `${data}\n`);
@@ -288,17 +339,20 @@ export abstract class CDPServer {
 
 export class CDPProxy extends CDPServer {
   private inspectorWs: WebSocket;
+  private shouldPauseOnOpen?: () => boolean;
+  private internalMsgId = 0;
 
   constructor(
     inspectorUrl: string,
     options: ConstructorParameters<typeof CDPServer>[0],
   ) {
     super(options);
+    this.shouldPauseOnOpen = options.shouldPauseOnOpen;
     this.inspectorWs = new WebSocket(inspectorUrl);
     this.attachHandlersToInspectorWs();
   }
 
-  async handleClientMessage(ws: WsWebSocket, data: string): Promise<void> {
+  async handleClientMessage(_ws: WsWebSocket, data: string): Promise<void> {
     logger.log(`[${this.name}] Client message:`, data);
     this.inspectorWs.send(data);
   }
@@ -318,6 +372,26 @@ export class CDPProxy extends CDPServer {
 
     this.inspectorWs.onopen = async () => {
       logger.log(`[${this.name}] Inspector opened`);
+      try {
+        if (this.shouldPauseOnOpen?.()) {
+          // Enable debugger and pause immediately so breakpoints can bind
+          const enableMsg = JSON.stringify({
+            id: ++this.internalMsgId,
+            method: "Debugger.enable",
+            params: {},
+          });
+          this.inspectorWs?.send(enableMsg);
+
+          const pauseMsg = JSON.stringify({
+            id: ++this.internalMsgId,
+            method: "Debugger.pause",
+            params: {},
+          });
+          this.inspectorWs?.send(pauseMsg);
+        }
+      } catch (err) {
+        logger.error(`[${this.name}] Failed to send initial pause`, err);
+      }
     };
   }
 }
