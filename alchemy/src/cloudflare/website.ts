@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { alchemy } from "../alchemy.ts";
@@ -305,7 +306,7 @@ export async function Website<B extends Bindings>(
     let url: string | undefined;
     if (dev && scope.local) {
       url = await runDevCommand(scope, {
-        id,
+        name,
         command: typeof dev === "string" ? dev : dev.command,
         env: {
           ...env,
@@ -352,22 +353,79 @@ async function writeMiniflareSymlink(cwd: string) {
 async function runDevCommand(
   scope: Scope,
   props: {
-    id: string;
+    name: string;
     command: string;
     env: Record<string, string | Secret<string> | undefined>;
     cwd?: string;
   },
 ) {
-  const persistFile = path.join(process.cwd(), ".alchemy", `${props.id}.pid`);
+  const alchemyDir = path.join(process.cwd(), ".alchemy");
+  const persistFile = path.join(alchemyDir, `${props.name}.pid`);
+  const logFile = path.join(alchemyDir, `${props.name}.log`);
+
+  // Check if process is already running
   if (await exists(persistFile)) {
     const pid = Number.parseInt(await fs.readFile(persistFile, "utf8"));
-    await exitProcess(pid, "SIGTERM");
-    await removePersistFile(persistFile);
-  }
-  const command = props.command.split(" ");
-  const [cmd, ...args] = command;
+    try {
+      // Check if process is still alive
+      process.kill(pid, 0);
+      // Process is still running, reattach to the log stream
+      logger.log(
+        `Dev server for ${props.name} is already running (pid: ${pid}), reattaching to log stream...`,
+      );
 
-  const childProcess = spawn(cmd, args, {
+      // Read existing log content to find URL and display it
+      const logContent = await fs.readFile(logFile, "utf8");
+
+      // Stream new log content as it's written
+      const logStream = createReadStream(logFile, {
+        encoding: "utf8",
+        start: logContent.length,
+      });
+
+      logStream.on("data", (data) => {
+        process.stdout.write(data);
+      });
+
+      scope.onCleanup(async () => {
+        logStream.destroy();
+      });
+
+      // Find the URL from the log file
+      const URL_REGEX =
+        /http:\/\/(?:(?:localhost|0\.0\.0\.0|127\.0\.0\.1)|(?:\d{1,3}\.){3}\d{1,3}):\d+(?:\/)?/;
+      const match = logContent
+        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
+        .match(URL_REGEX);
+      if (match) {
+        return match[0];
+      }
+      throw new Error(`Could not find URL in log file for ${props.name}`);
+    } catch (e: any) {
+      // Process is not alive, clean up
+      if (e.code !== "ESRCH") {
+        throw e;
+      }
+      try {
+        await fs.unlink(persistFile);
+      } catch {
+        // ignore
+      }
+      try {
+        await fs.unlink(logFile);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  // Create log file
+  await fs.mkdir(alchemyDir, { recursive: true });
+  await fs.writeFile(logFile, ""); // Create empty log file
+
+  // Use shell to pipe output to both log file and stdout/stderr
+  const shellCommand = `${props.command} 2>&1 | tee "${logFile}"`;
+
+  const childProcess = spawn(shellCommand, {
     cwd: props.cwd,
     shell: true,
     env: {
@@ -391,6 +449,7 @@ async function runDevCommand(
     stdio: "pipe",
   });
   await once(childProcess, "spawn");
+
   scope.onCleanup(async () => {
     if (childProcess.exitCode === null && !childProcess.killed) {
       childProcess.kill("SIGTERM");
@@ -401,19 +460,21 @@ async function runDevCommand(
       if (!childProcess.killed) {
         childProcess.kill("SIGKILL");
       }
-      await removePersistFile(persistFile);
+    }
+    try {
+      await fs.unlink(persistFile);
+    } catch {
+      // ignore
     }
   });
   if (childProcess.pid) {
-    await fs.mkdir(path.dirname(persistFile), { recursive: true });
     await fs.writeFile(persistFile, childProcess.pid.toString());
-    childProcess.on("exit", async () => {
-      await removePersistFile(persistFile);
-    });
   }
   const URL_REGEX =
     /http:\/\/(?:(?:localhost|0\.0\.0\.0|127\.0\.0\.1)|(?:\d{1,3}\.){3}\d{1,3}):\d+(?:\/)?/;
   const promise = new DeferredPromise<string>();
+
+  // Monitor stdout for URL
   childProcess.stdout.on("data", (data) => {
     if (promise.status === "pending") {
       const match = data
@@ -426,6 +487,7 @@ async function runDevCommand(
     }
     process.stdout.write(data);
   });
+
   childProcess.stderr.on("data", (data) => {
     process.stderr.write(data);
   });
@@ -434,39 +496,8 @@ async function runDevCommand(
     promise.value,
     once(childProcess, "exit").then(([code, signal]) => {
       throw new Error(
-        `Dev command "${props.command}" for "${props.id}" failed to start (code: ${code}, signal: ${signal})`,
+        `Dev command "${props.command}" for "${props.name}" failed to start (code: ${code}, signal: ${signal})`,
       );
     }),
   ]);
 }
-
-const exitProcess = async (pid: number, signal: "SIGTERM" | "SIGKILL") => {
-  try {
-    process.kill(pid, signal);
-  } catch {
-    return;
-  }
-  for (let i = 0; i < 10; i++) {
-    try {
-      process.kill(pid, 0);
-      await new Promise((resolve) => setTimeout(resolve, i * 100));
-    } catch {
-      return;
-    }
-  }
-  if (signal === "SIGKILL") {
-    logger.warn(
-      "Failed to exit previous process for dev command. The server may still be running.",
-    );
-  } else {
-    return await exitProcess(pid, "SIGKILL");
-  }
-};
-
-const removePersistFile = async (file: string) => {
-  try {
-    await fs.unlink(file);
-  } catch {
-    // ignore
-  }
-};
