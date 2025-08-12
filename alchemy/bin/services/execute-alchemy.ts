@@ -155,7 +155,6 @@ export async function execAlchemy(
 
   onExit((_, signal) => {
     if (child.exitCode === null) {
-      console.log("Killing child", child.pid, signal);
       child.kill(signal ?? "SIGINT");
       return true;
     }
