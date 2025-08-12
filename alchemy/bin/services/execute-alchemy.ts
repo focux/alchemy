@@ -153,13 +153,16 @@ export async function execAlchemy(
   }
 
   const controller = new AbortController();
-  onExit((code) => {
+  process.on("beforeExit", () => {
+    if (child.exitCode === null) {
+      console.log("Killing child", child.pid);
+      child.kill("SIGKILL");
+    }
+  });
+  onExit(() => {
     if (!controller.signal.aborted) {
       controller.abort();
       return true;
-    } else if (child.exitCode === null) {
-      child.kill("SIGKILL");
-      process.exit(code);
     }
   });
   console.log(command);
