@@ -115,7 +115,7 @@ export const createFallbackLogger = (alchemyInfo: AlchemyInfo): LoggerApi => {
       if (prefixWithColor && resource) {
         console.log(`${prefixWithColor}${resource} ${message}`);
       } else if (prefixWithColor) {
-        console.log(`${prefixWithColor}${message}`);
+        console.log(`${prefixWithColor} ${message}`);
       } else {
         console.log(`${message}`);
       }

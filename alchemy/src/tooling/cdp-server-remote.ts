@@ -94,12 +94,12 @@ export class CoreCDPServer {
     });
 
     this.worker.on("error", (error) => {
-      logger.error("[DebugServer] Worker process error:", error);
+      logger.error("[debug] Worker process error:", error);
     });
 
     this.worker.on("exit", (code, signal) => {
       logger.warn(
-        `[DebugServer] Worker process exited with code ${code}, signal ${signal}`,
+        `[debug] Worker process exited with code ${code}, signal ${signal}`,
       );
       this.ready = false;
     });
@@ -115,20 +115,9 @@ export class CoreCDPServer {
     const id = (++this.requestId).toString();
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`Request timeout for method: ${method}`));
-      }, 30000);
-
       this.pendingRequests.set(id, {
-        resolve: (value) => {
-          clearTimeout(timeout);
-          resolve(value);
-        },
-        reject: (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
+        resolve: resolve,
+        reject: reject,
       });
 
       this.worker!.send({ id, method, params });

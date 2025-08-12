@@ -48,7 +48,9 @@ export class CoreCDPServer {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     this.port = await findOpenPort();
     this.url = `http://localhost:${this.port}`;
-    this.server.listen(this.port, () => {});
+    this.server.listen(this.port, () => {
+      console.log(`Debug server started at ${this.url}`);
+    });
   }
 
   private handleRequest(req: any, res: any): void {
@@ -90,7 +92,7 @@ export class CoreCDPServer {
         if (cdpServer) {
           cdpServer.handleUpgrade(request, socket, head);
         } else {
-          logger.task("DebugServer", {
+          logger.task("debug", {
             message: `CDP server ${serverName} not found, destroying socket. Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
             status: "failure",
             prefixColor: "magenta",
@@ -101,7 +103,7 @@ export class CoreCDPServer {
         socket.destroy();
       }
     } catch (error) {
-      logger.task("DebugServer", {
+      logger.task("debug", {
         message: `Error handling upgrade: ${error}`,
         status: "failure",
         prefixColor: "magenta",
@@ -134,7 +136,7 @@ export class CoreCDPServer {
 
   private registerCDPServer(name: string, server: CDPServer) {
     this.cdpServers.set(name, server);
-    logger.task("DebugServer", {
+    logger.task("debug", {
       message: `CDP server ${name} registered. Available servers: ${Array.from(this.cdpServers.keys()).join(", ")}`,
       status: "success",
       prefixColor: "magenta",
@@ -216,7 +218,6 @@ export abstract class CDPServer {
     try {
       const message = JSON.parse(data);
       const messageDomain = message.method?.split(".")?.[0];
-      //todo(michael): this check is messy and doesn't work well for responses
       if (messageDomain != null && !this.domains.has(messageDomain)) {
         return;
       }
@@ -239,13 +240,9 @@ export abstract class CDPServer {
 
   public handleUpgrade(request: any, socket: any, head: any): void {
     try {
-      logger.log(`[${this.name}:Debug] Handling WebSocket upgrade`);
-      this.wss.handleUpgrade(request, socket, head, (ws) => {
-        logger.log(
-          `[${this.name}:Debug] WebSocket upgrade successful, emitting connection`,
-        );
-        this.wss.emit("connection", ws, request);
-      });
+      this.wss.handleUpgrade(request, socket, head, (ws) =>
+        this.wss.emit("connection", ws, request),
+      );
     } catch (error) {
       logger.error(
         `[${this.name}:Debug] Error during WebSocket upgrade:`,
@@ -289,7 +286,6 @@ export class CDPProxy extends CDPServer {
     };
 
     this.inspectorWs.onopen = async () => {
-      logger.log(`[${this.name}:Debug] Inspector opened`);
       try {
         if (this.shouldPauseOnOpen?.()) {
           const enableMsg = JSON.stringify({

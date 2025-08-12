@@ -180,7 +180,7 @@ export async function execAlchemy(
     if (subprocess.stdout) {
       subprocess.stdout.on("data", (data) => {
         const string = data.toString();
-        const cdpServerMatch = string.match(/CDP\sServer\sstarted\sat\s(.*)/);
+        const cdpServerMatch = string.match(/Debug\sserver\sstarted\sat\s(.*)/);
         if (cdpServerMatch) {
           cdpServer = cdpServerMatch[1];
           resolveCdpServer(cdpServer);

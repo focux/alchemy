@@ -197,28 +197,32 @@ async function _alchemy(
       await stage.run(async () => {
         const cdpServer = new CoreCDPServer();
         if (mergedOptions?.waitForRootCDPServer) {
-          logger.task("DebugServer", {
+          logger.task("debug", {
             message: "Waiting for debug server to connect",
             status: "pending",
+            prefix: "debug",
             prefixColor: "magenta",
           });
           await cdpServer.waitForRootCDP();
-          logger.task("DebugServer", {
+          logger.task("debug", {
             message: "Debug server connected",
             status: "success",
+            prefix: "debug",
             prefixColor: "magenta",
           });
         }
         if (mergedOptions?.waitForDebugger) {
-          logger.task("DebugServer", {
+          logger.task("debug", {
             message: "Waiting for debugger",
             status: "pending",
+            prefix: "debug",
             prefixColor: "magenta",
           });
           await cdpServer.waitForDebugger();
-          logger.task("DebugServer", {
+          logger.task("debug", {
             message: "Debugger connected",
             status: "success",
+            prefix: "debug",
             prefixColor: "magenta",
           });
         }
