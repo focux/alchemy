@@ -32,14 +32,6 @@ process.on("message", async (message: any) => {
         result = undefined;
         break;
 
-      case "getPort":
-        result = cdpServer.getPort();
-        break;
-
-      case "getRootCDPUrl":
-        result = cdpServer.getRootCDPUrl();
-        break;
-
       case "close":
         cdpServer.close();
         result = undefined;

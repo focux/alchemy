@@ -1,12 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { logger } from "../util/logger.ts";
+import path from "pathe";
 import { detectRuntime } from "../util/detect-node-runtime.ts";
 import { detectPackageManager } from "../util/detect-package-manager.ts";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { logger } from "../util/logger.ts";
 
 /**
  * Remote CDP server that runs in a separate process.
@@ -38,7 +34,7 @@ export class CoreCDPServer {
     });
   }
   private async startWorker() {
-    const workerPath = path.join(__dirname, "cdp-server-worker.ts");
+    const workerPath = path.join(import.meta.dirname, "cdp-server-worker.ts");
 
     // Detect package manager and runtime (copied from execute-alchemy.ts)
     const packageManager = await detectPackageManager(process.cwd());
@@ -82,7 +78,6 @@ export class CoreCDPServer {
     this.worker.on("message", (message: any) => {
       if (message.type === "ready") {
         this.ready = true;
-        logger.log("[CoreCDPServer] CDP server worker is ready");
         return;
       }
 
@@ -99,12 +94,12 @@ export class CoreCDPServer {
     });
 
     this.worker.on("error", (error) => {
-      logger.error("[CoreCDPServer] Worker process error:", error);
+      logger.error("[DebugServer] Worker process error:", error);
     });
 
     this.worker.on("exit", (code, signal) => {
-      logger.log(
-        `[CoreCDPServer] Worker process exited with code ${code}, signal ${signal}`,
+      logger.warn(
+        `[DebugServer] Worker process exited with code ${code}, signal ${signal}`,
       );
       this.ready = false;
     });
@@ -151,18 +146,6 @@ export class CoreCDPServer {
 
   public async waitForDebugger(): Promise<void> {
     return this.sendRequest("waitForDebugger");
-  }
-
-  public getPort(): number | undefined {
-    // This would need to be async, but to maintain interface compatibility,
-    // we'll return undefined and let the caller handle it differently
-    return undefined;
-  }
-
-  public getRootCDPUrl(): string | undefined {
-    // This would need to be async, but to maintain interface compatibility,
-    // we'll return undefined and let the caller handle it differently
-    return undefined;
   }
 
   public close(): void {
