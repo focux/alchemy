@@ -389,6 +389,19 @@ async function runDevCommand(
 
       scope.onCleanup(async () => {
         logStream.destroy();
+        try {
+          console.log("Killing process", pid);
+          process.kill(pid, "SIGTERM");
+          if (!(await waitForExit(pid))) {
+            console.log("Killing process", pid, "SIGKILL");
+            process.kill(pid, "SIGKILL");
+            await waitForExit(pid);
+          }
+          await fs.unlink(persistFile);
+        } catch {
+          console.log("Failed to kill process", pid);
+          // ignore
+        }
       });
 
       // Find the URL from the log file
@@ -501,3 +514,22 @@ async function runDevCommand(
     }),
   ]);
 }
+
+const waitForExit = async (pid: number) => {
+  for (let i = 0; i < 10; i++) {
+    if (!isProcessRunning(pid)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, i * 100));
+  }
+  return false;
+};
+
+const isProcessRunning = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
