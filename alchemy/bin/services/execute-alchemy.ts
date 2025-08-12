@@ -2,6 +2,7 @@ import { log } from "@clack/prompts";
 import { execa } from "execa";
 import { resolve } from "node:path";
 import pc from "picocolors";
+import { onExit } from "signal-exit";
 import z from "zod";
 import { detectRuntime } from "../../src/util/detect-node-runtime.ts";
 import { detectPackageManager } from "../../src/util/detect-package-manager.ts";
@@ -151,25 +152,38 @@ export async function execAlchemy(
       }
   }
 
-  try {
-    console.log(command);
-    await execa(command, {
-      cwd,
-      shell: true,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        FORCE_COLOR: "1",
-      },
-    });
-  } catch (error: any) {
-    log.error(pc.red(`Deploy failed: ${error.message}`));
-    if (error.stdout) {
-      console.log(error.stdout);
+  const controller = new AbortController();
+  onExit((code) => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+      return true;
+    } else if (child.exitCode === null) {
+      child.kill("SIGKILL");
+      process.exit(code);
     }
-    if (error.stderr) {
-      console.error(error.stderr);
+  });
+  console.log(command);
+  const child = execa(command, {
+    cwd,
+    shell: true,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      FORCE_COLOR: "1",
+    },
+    cancelSignal: controller.signal,
+    detached: true,
+    reject: false,
+  });
+  const result = await child;
+  if (result.failed && !controller.signal.aborted) {
+    log.error(pc.red(`Deploy failed: ${result.message}`));
+    if (result.stdout) {
+      console.log(result.stdout);
     }
-    throw error;
+    if (result.stderr) {
+      console.error(result.stderr);
+    }
   }
+  process.exit(result.exitCode ?? 0);
 }
