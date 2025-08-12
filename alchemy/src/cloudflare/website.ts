@@ -361,17 +361,8 @@ async function runDevCommand(
   const persistFile = path.join(process.cwd(), ".alchemy", `${props.id}.pid`);
   if (await exists(persistFile)) {
     const pid = Number.parseInt(await fs.readFile(persistFile, "utf8"));
-    try {
-      // Actually kill the process if it's alive
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // ignore
-    }
-    try {
-      await fs.unlink(persistFile);
-    } catch {
-      // ignore
-    }
+    await exitProcess(pid, "SIGTERM");
+    await removePersistFile(persistFile);
   }
   const command = props.command.split(" ");
   const [cmd, ...args] = command;
@@ -410,16 +401,15 @@ async function runDevCommand(
       if (!childProcess.killed) {
         childProcess.kill("SIGKILL");
       }
-    }
-    try {
-      await fs.unlink(persistFile);
-    } catch {
-      // ignore
+      await removePersistFile(persistFile);
     }
   });
   if (childProcess.pid) {
     await fs.mkdir(path.dirname(persistFile), { recursive: true });
     await fs.writeFile(persistFile, childProcess.pid.toString());
+    childProcess.on("exit", async () => {
+      await removePersistFile(persistFile);
+    });
   }
   const URL_REGEX =
     /http:\/\/(?:(?:localhost|0\.0\.0\.0|127\.0\.0\.1)|(?:\d{1,3}\.){3}\d{1,3}):\d+(?:\/)?/;
@@ -449,3 +439,34 @@ async function runDevCommand(
     }),
   ]);
 }
+
+const exitProcess = async (pid: number, signal: "SIGTERM" | "SIGKILL") => {
+  try {
+    process.kill(pid, signal);
+  } catch {
+    return;
+  }
+  for (let i = 0; i < 10; i++) {
+    try {
+      process.kill(pid, 0);
+      await new Promise((resolve) => setTimeout(resolve, i * 100));
+    } catch {
+      return;
+    }
+  }
+  if (signal === "SIGKILL") {
+    logger.warn(
+      "Failed to exit previous process for dev command. The server may still be running.",
+    );
+  } else {
+    return await exitProcess(pid, "SIGKILL");
+  }
+};
+
+const removePersistFile = async (file: string) => {
+  try {
+    await fs.unlink(file);
+  } catch {
+    // ignore
+  }
+};
