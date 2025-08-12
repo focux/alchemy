@@ -474,11 +474,6 @@ async function runDevCommand(
         childProcess.kill("SIGKILL");
       }
     }
-    try {
-      await fs.unlink(persistFile);
-    } catch {
-      // ignore
-    }
   });
   if (childProcess.pid) {
     await fs.writeFile(persistFile, childProcess.pid.toString());
