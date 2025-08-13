@@ -118,11 +118,12 @@ export class CoreCDPServer {
       name: "alchemy",
       server: this.server,
       domains: new Set(["Inspector", "Console", "Runtime", "Debugger"]),
-      shouldPauseOnOpen: () => this.waitingForDebugger,
-      waitMode: this.waitingForDebugger ? "pause" : "idle",
+      waitForDebugger: this.waitingForDebugger,
       onDebuggerConnected: () => {
-        if (!this.waitingForDebugger && this.debuggerResolve) {
+        if (this.debuggerResolve) {
           this.debuggerResolve();
+          this.debuggerResolve = undefined;
+          this.waitingForDebugger = false;
         }
       },
     });
@@ -170,13 +171,11 @@ import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
 export type WaitMode = "idle" | "pause";
 
 export abstract class CDPServer {
-  private logFile: string;
+  protected logFile: string;
   protected domains: Set<string>;
   protected name: string;
   private wss: WebSocketServer;
   private lastClient: WsWebSocket | null = null;
-  private waitMode: WaitMode;
-  private onDebuggerConnected?: () => void;
 
   constructor(options: {
     name: string;
@@ -184,16 +183,12 @@ export abstract class CDPServer {
     logFile?: string;
     domains?: Set<string>;
     onDebuggerConnected?: () => void;
-    waitMode?: WaitMode;
-    shouldPauseOnOpen?: () => boolean;
   }) {
     this.domains = options.domains ?? new Set(["Console"]);
     this.logFile =
       options.logFile ??
       path.join(process.cwd(), ".alchemy", "logs", `${options.name}.log`);
     this.name = options.name;
-    this.waitMode = options.waitMode ?? "idle";
-    this.onDebuggerConnected = options.onDebuggerConnected;
     fs.writeFileSync(this.logFile, "");
     this.wss = new WebSocketServer({
       noServer: true,
@@ -201,9 +196,11 @@ export abstract class CDPServer {
 
     this.wss.on("connection", async (clientWs) => {
       this.lastClient = clientWs;
-
-      if (this.waitMode === "idle") {
-        this.onDebuggerConnected?.();
+      if (options.onDebuggerConnected) {
+        console.log("WILL MARK DEBUGGER CONNECTED IN 5 SECONDS");
+        setTimeout(() => {
+          options.onDebuggerConnected?.();
+        }, 5000);
       }
 
       clientWs.on("message", async (data) => {
@@ -222,9 +219,11 @@ export abstract class CDPServer {
         return;
       }
 
-      if (message.id == null) {
+      // if (message.id == null) {
+      if (message.method !== "Debugger.scriptParsed") {
         await fs.promises.appendFile(this.logFile, `${data}\n`);
       }
+      // }
       if (this.lastClient != null) {
         this.lastClient.send(data);
       }
@@ -255,20 +254,23 @@ export abstract class CDPServer {
 
 export class CDPProxy extends CDPServer {
   private inspectorWs: WebSocket;
-  private shouldPauseOnOpen?: () => boolean;
   private internalMsgId = 0;
+  private waitForDebugger: boolean;
 
   constructor(
     inspectorUrl: string,
-    options: ConstructorParameters<typeof CDPServer>[0],
+    options: ConstructorParameters<typeof CDPServer>[0] & {
+      waitForDebugger?: boolean;
+    },
   ) {
     super(options);
-    this.shouldPauseOnOpen = options.shouldPauseOnOpen;
     this.inspectorWs = new WebSocket(inspectorUrl);
     this.attachHandlersToInspectorWs();
+    this.waitForDebugger = options.waitForDebugger ?? false;
   }
 
   async handleClientMessage(_ws: WsWebSocket, data: string): Promise<void> {
+    await fs.promises.appendFile(this.logFile, `${data}\n`);
     this.inspectorWs.send(data);
   }
 
@@ -287,12 +289,13 @@ export class CDPProxy extends CDPServer {
 
     this.inspectorWs.onopen = async () => {
       try {
-        if (this.shouldPauseOnOpen?.()) {
+        if (this.waitForDebugger) {
           const enableMsg = JSON.stringify({
             id: ++this.internalMsgId,
             method: "Debugger.enable",
             params: {},
           });
+          await fs.promises.appendFile(this.logFile, `${enableMsg}\n`);
           this.inspectorWs?.send(enableMsg);
 
           const pauseMsg = JSON.stringify({
@@ -300,6 +303,7 @@ export class CDPProxy extends CDPServer {
             method: "Debugger.pause",
             params: {},
           });
+          await fs.promises.appendFile(this.logFile, `${pauseMsg}\n`);
           this.inspectorWs?.send(pauseMsg);
         }
       } catch (err) {
