@@ -44,7 +44,6 @@ export const execArgs = {
   envFile: z
     .string()
     .optional()
-    .default(".env")
     .describe("Path to environment file to load"),
 } as const;
 
