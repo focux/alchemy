@@ -1,3 +1,13 @@
+## v0.60.2
+
+### &nbsp;&nbsp;&nbsp;🐞 Bug Fixes
+
+- **core**: Properly set --watch for alchemy dev &nbsp;-&nbsp; by **Sam Goodwin** in https://github.com/sam-goodwin/alchemy/issues/836 [<samp>(2200a)</samp>](https://github.com/sam-goodwin/alchemy/commit/2200aaf)
+
+##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/sam-goodwin/alchemy/compare/v0.60.1...v0.60.2)
+
+---
+
 ## v0.60.1
 
 ### &nbsp;&nbsp;&nbsp;🐞 Bug Fixes
