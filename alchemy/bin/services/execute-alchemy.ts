@@ -83,7 +83,7 @@ export async function execAlchemy(
     execArgs.push("--watch");
     args.push("--watch");
   }
-  if (envFile) execArgs.push(`--env-file ${envFile}`);
+  if (envFile) execArgs.push(`--env-file-if-exists ${envFile}`);
   if (dev) args.push("--dev");
 
   // Check for alchemy.run.ts or alchemy.run.js (if not provided)
