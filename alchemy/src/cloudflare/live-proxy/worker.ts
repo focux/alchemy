@@ -24,8 +24,10 @@ const bridge = once(() =>
 // Proxies a function call to a Local Worker through a central Coordinator DO.
 const proxy =
   (prop: keyof ProxiedHandler) =>
-  async (...args: any[]): Promise<any> =>
-    (await bridge())[prop](...args);
+  async (...args: any[]): Promise<any> => {
+    console.log(args);
+    return (await bridge())[prop](...args);
+  };
 
 export default {
   // hooks called by the Cloudflare platform for push-based events

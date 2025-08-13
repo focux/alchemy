@@ -40,7 +40,7 @@ await queue.send({
   body: "Hello, world!",
 });
 
-const { tunnelUrl, localUrl } = await tunnel();
+const { tunnelUrl, localUrl } = await tunnel(app, "http://localhost:8080");
 
 await new Promise((resolve) => setTimeout(resolve, 1000));
 

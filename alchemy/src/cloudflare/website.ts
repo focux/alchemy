@@ -358,7 +358,7 @@ async function runDevCommand(
     cwd?: string;
   },
 ) {
-  const persistFile = path.join(process.cwd(), ".alchemy", `${props.id}.pid`);
+  const persistFile = path.join(scope.dotAlchemy, `${props.id}.pid`);
   if (await exists(persistFile)) {
     const pid = Number.parseInt(await fs.readFile(persistFile, "utf8"));
     try {
