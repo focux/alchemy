@@ -1,9 +1,9 @@
 import alchemy from "alchemy";
 import { DurableObjectNamespace, Queue, Worker } from "alchemy/cloudflare";
 import { SQLiteStateStore } from "alchemy/state";
+import { quickTunnel } from "../quick-tunnel.ts";
 import { link } from "./link.ts";
 import type { ProxiedHandler } from "./protocol.ts";
-import { tunnel } from "./tunnel.ts";
 
 const app = await alchemy("my-test-app", {
   stateStore: (scope) => new SQLiteStateStore(scope),
@@ -30,19 +30,15 @@ const proxy = await Worker("live-proxy", {
     }),
     QUEUE: queue,
   },
+  eventSources: [queue],
   adopt: true,
   dev: {
     remote: true,
   },
+  sourceMap: true,
 });
 
-await queue.send({
-  body: "Hello, world!",
-});
-
-const { tunnelUrl, localUrl } = await tunnel(app, "http://localhost:8080");
-
-await new Promise((resolve) => setTimeout(resolve, 1000));
+const { tunnelUrl, localUrl } = await quickTunnel(app, "http://localhost:8080");
 
 const client = await link<ProxiedHandler>({
   role: "server",
@@ -62,12 +58,17 @@ const client = await link<ProxiedHandler>({
     },
     async scheduled(event, ctx) {},
     async queue(batch: MessageBatch, ctx) {
-      console.log(batch);
+      console.log("batch", batch);
       batch.ackAll();
-      batch.messages[0].ack();
+      // batch.messages[0].ack();
     },
     async test(controller, ctx) {},
   } satisfies ProxiedHandler,
 });
 
-await app.finalize();
+while (true) {
+  await queue.send({
+    body: "Hello, world!",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+}

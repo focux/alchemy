@@ -86,10 +86,12 @@ export class Server extends DurableObject {
       // -> FWD it to the Local Worker via the tunnel
       return this.local.fetch(request);
     }
-    return notConnected();
+    return notConnected("Fall Through");
   }
 
   private async restoreWebSockets() {
+    // TODO(sam): this can throw:
+    // > TypeError The Durable Object's code has been updated, this version can no longer access storage.
     this._counter = (await this.ctx.storage.get<number>("counter")) ?? 0;
 
     this.ctx.getWebSockets().map((ws) => {
@@ -107,14 +109,13 @@ export class Server extends DurableObject {
 
   async webSocketMessage(
     ws: WebSocket,
-    _message: string | ArrayBuffer,
+    message: string | ArrayBuffer,
   ): Promise<void> {
-    const message =
-      typeof _message === "string"
-        ? _message
-        : new TextDecoder().decode(_message);
     const attachment = ws.deserializeAttachment() as WebSocketAttachment;
-    const data = JSON.parse(message) as RpcMessage;
+    const data = JSON.parse(
+      typeof message === "string" ? message : new TextDecoder().decode(message),
+    ) as RpcMessage;
+    console.log(JSON.stringify(data, null, 2));
 
     if (attachment.type === "call") {
       // mesage received from the Remote Worker sending a RPC call to the Local Worker

@@ -11,6 +11,7 @@ export async function connect({
   path: string;
   body?: any;
 }): Promise<WebSocket> {
+  console.log("connect", remote, path);
   const authToken = token
     ? typeof token === "string"
       ? token
@@ -20,26 +21,26 @@ export async function connect({
   // If not in Workers, use a real WS client (Bun/Node) for a proper handshake
   if (typeof remote === "string" || remote instanceof URL) {
     const url = new URL(remote.toString());
-    const joined = new URL(path, url);
-    joined.searchParams.set("tunnelUrl", body?.tunnelUrl);
+    url.pathname = path;
+    url.searchParams.set("tunnelUrl", body?.tunnelUrl);
     if (authToken) {
-      joined.searchParams.set("authToken", authToken);
+      url.searchParams.set("authToken", authToken);
     }
-    const ws = new WebSocket(joined.toString());
+    const ws = new WebSocket(url.toString());
 
     const { promise, resolve, reject } = Promise.withResolvers<WebSocket>();
     let isResolved = false;
     ws.addEventListener("open", () => {
-      console.log("open");
+      console.log("open", remote, path);
       isResolved = true;
       resolve(ws);
     });
     ws.addEventListener("error", (e) => {
-      console.log("error", e);
+      console.log("error", remote, path, e);
       reject(e instanceof Error ? e : new Error(String(e)));
     });
-    ws.addEventListener("close", () => {
-      console.log("close");
+    ws.addEventListener("close", (event) => {
+      console.log("close", remote, path, event);
       if (!isResolved) {
         reject(new Error("Connection closed"));
       }
@@ -55,9 +56,9 @@ export async function connect({
     ...(authToken ? { Authorization: authToken } : {}),
   };
 
-  const response = await (typeof remote === "string" || remote instanceof URL
-    ? fetch(`${remote.toString()}${path}`, { headers })
-    : remote.fetch(path, { headers }));
+  const response = await remote.fetch(`http://localhost${path}`, {
+    headers,
+  });
 
   if (!response.webSocket) {
     let msg = `HTTP ${response.status} ${response.statusText}`;
@@ -67,5 +68,6 @@ export async function connect({
     } catch {}
     throw new Error(msg);
   }
+  response.webSocket.accept();
   return response.webSocket;
 }

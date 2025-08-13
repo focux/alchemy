@@ -25,7 +25,7 @@ const bridge = once(() =>
 const proxy =
   (prop: keyof ProxiedHandler) =>
   async (...args: any[]): Promise<any> => {
-    console.log(args);
+    console.log(prop, args);
     return (await bridge())[prop](...args);
   };
 
