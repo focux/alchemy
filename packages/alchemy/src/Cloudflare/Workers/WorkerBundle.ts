@@ -20,6 +20,25 @@ import {
   type DurableObjectExport,
 } from "./DurableObject.ts";
 
+/**
+ * Bundler options for a Worker: the generic {@link Bundle.BundleExtraOptions}
+ * plus rolldown output overrides merged over Alchemy's defaults.
+ */
+export interface WorkerBuildOptions extends Bundle.BundleExtraOptions {
+  /**
+   * Rolldown output options merged over Alchemy's defaults. Use this to
+   * control chunking (`codeSplitting`), minification, etc.
+   */
+  output?: rolldown.OutputOptions;
+  /**
+   * Forwarded to rolldown's `preserveEntrySignatures` input option. Some
+   * `output.codeSplitting` configurations require relaxing it (e.g.
+   * `includeDependenciesRecursively: false` needs `"allow-extension"`).
+   * Workers must keep their entry exports, so never pass `false`.
+   */
+  preserveEntrySignatures?: rolldown.InputOptions["preserveEntrySignatures"];
+}
+
 export interface WorkerBundleOptions {
   id: string;
   main: string;
@@ -36,7 +55,7 @@ export interface WorkerBundleOptions {
         exports: Record<string, DurableObjectExport | WorkflowExport>;
       };
   stack: { name: string; stage: string };
-  extraOptions: Bundle.BundleExtraOptions | undefined;
+  extraOptions: WorkerBuildOptions | undefined;
 }
 
 export const WorkerBundle = Effect.gen(function* () {
@@ -48,6 +67,7 @@ export const WorkerBundle = Effect.gen(function* () {
     const realMain = yield* sanitizeMain(options.main);
     const inputOptions: rolldown.InputOptions = {
       input: realMain,
+      preserveEntrySignatures: options.extraOptions?.preserveEntrySignatures,
       // Forever-devtool native modules that vite/chokidar reference behind
       // runtime guards. Rolldown resolves before tree-shaking, so the dead
       // `require('../pkg')` (lightningcss < 1.32) and `require('fsevents')`
@@ -89,7 +109,17 @@ export const WorkerBundle = Effect.gen(function* () {
       sourcemap: "hidden",
       minify: true,
       keepNames: true,
+      // Rolldown's default chunking can split top-level initializer modules
+      // (e.g. Drizzle `pgTable` schemas) away from the classes they read,
+      // and workerd then evaluates a reader before its imported binding is
+      // initialized — the script fails Cloudflare startup validation with
+      // `ScriptStartupError: Cannot access '<minified>' before
+      // initialization` (#749). `strictExecutionOrder` wraps cross-chunk
+      // modules so evaluation follows ESM semantics regardless of how the
+      // graph was chunked. See DrizzleSchemaChunks.test.ts.
+      strictExecutionOrder: true,
       dir: `.alchemy/bundles/${options.id}`,
+      ...options.extraOptions?.output,
     };
     return { inputOptions, outputOptions, extraOptions: options.extraOptions };
   });
