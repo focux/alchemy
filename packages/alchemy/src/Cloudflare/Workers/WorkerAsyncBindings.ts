@@ -35,7 +35,12 @@ import {
 import { isRateLimit } from "./RateLimit.ts";
 import { isVersionMetadata } from "./VersionMetadata.ts";
 import type { WorkerBindingProps } from "./Worker.ts";
-import { isWorker, type Worker, type WorkerProps } from "./Worker.ts";
+import {
+  isSelfUrl,
+  isWorker,
+  type Worker,
+  type WorkerProps,
+} from "./Worker.ts";
 import type { WorkerBinding, WorkerBindingResource } from "./WorkerBinding.ts";
 import { isWorkerLoader } from "./WorkerLoader.ts";
 
@@ -373,6 +378,13 @@ const toBinding = (
   } else if (isVersionMetadata(binding)) {
     return {
       type: "version_metadata",
+      name: bindingName,
+    };
+  } else if (isSelfUrl(binding)) {
+    // The Worker's own URL. The provider lowers this sentinel into a
+    // `plain_text` binding holding the resolved URL just before upload.
+    return {
+      type: "self_url",
       name: bindingName,
     };
   } else if (isWorkerLoader(binding)) {

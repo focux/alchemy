@@ -51,7 +51,10 @@ export type GetBindingType<T> =
   // generic Effect unwrap: a Container declaration is itself an Effect.
   T extends Container.Decl<any, any, any, any, infer DOShape>
     ? DurableObjectNamespace<DOShape & Rpc.DurableObjectBranded>
-    : T extends Effect.Effect<infer A, infer _E, infer _R>
+    : // `Worker.URL` (an Effect resolving to a deferred string accessor) needs
+      // no case of its own: the generic Effect unwrap below reduces it to
+      // `string` via the fallthrough.
+      T extends Effect.Effect<infer A, infer _E, infer _R>
       ? GetBindingType<A>
       : T extends FlagshipNs.App
         ? Flagship
