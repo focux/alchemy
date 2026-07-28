@@ -62,6 +62,7 @@ import {
   ensureTaskLogGroup,
   reapSupersededTaskDefinitionRevision,
   registerTaskDefinitionRevision,
+  syncEnvironmentFilesPolicy,
   syncTaskDefinitionTags,
   taskImagePlatform,
   type TaskBindingContract,
@@ -3072,6 +3073,13 @@ export const ServiceProvider = () =>
         yield* syncTaskSecretsPolicy({
           roleName: executionRoleName,
           secretArns: secretEntries.map(([, arn]) => arn),
+        });
+
+        // Environment files: the execution role reads the referenced S3
+        // objects at task start.
+        yield* syncEnvironmentFilesPolicy({
+          roleName: executionRoleName,
+          environmentFiles: news.environmentFiles,
         });
 
         const logGroupArn =
