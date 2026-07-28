@@ -1423,7 +1423,17 @@ export const LiveWorkerProvider = () =>
               )).filter(([_, value]) => value !== undefined),
             ),
             {
-              main: props.vite?.main,
+              // A relative `vite.main` is documented to resolve from the Vite
+              // root. The rolldown plugin resolves the worker entry with no
+              // importer (i.e. against `process.cwd()`), which breaks when the
+              // deploy runs from a different directory (e.g. a monorepo infra
+              // package) — absolutize before handing it over (#796).
+              main: props.vite?.main
+                ? path.resolve(
+                    props.vite.rootDir ?? process.cwd(),
+                    props.vite.main,
+                  )
+                : undefined,
               compatibilityDate: compatibility.date,
               compatibilityFlags: compatibility.flags,
               viteEnvironments: props.vite?.viteEnvironments,
@@ -3364,6 +3374,7 @@ export const LiveWorkerProvider = () =>
             );
           } else {
             yield* session.note("Pre-creating worker...");
+            const compatibility = getCompatibility(news);
             const mainModule = "main.js";
             const placeholderScript = `${doClasses.length > 0 ? 'import { DurableObject } from "cloudflare:workers";\n\n' : ""}export default { fetch() { return new Response("Alchemy worker is being deployed...") } };\n${doClasses
               .map(
@@ -3385,7 +3396,11 @@ export const LiveWorkerProvider = () =>
                         className,
                       }))
                     : undefined,
-                ...getCompatibility(news),
+                // Spreading `getCompatibility` here would set `date`/`flags`,
+                // which are not metadata keys — the placeholder would upload
+                // with no compatibility date or flags at all.
+                compatibilityDate: compatibility.date,
+                compatibilityFlags: compatibility.flags,
                 containers,
                 migrations:
                   doClasses.length > 0

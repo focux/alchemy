@@ -573,7 +573,11 @@ export const LocalWorkerProvider = () =>
           workerBindings,
           durableObjectNamespaces: Object.values(durableObjectNamespaces),
           workflows: Object.values(workflows),
-          viteMain: props.vite?.main,
+          // Relative `vite.main` resolves from the Vite root (see the
+          // matching normalization in WorkerProvider's `viteBuild`).
+          viteMain: props.vite?.main
+            ? path.resolve(props.vite.rootDir ?? process.cwd(), props.vite.main)
+            : undefined,
           viteEnvironments: props.vite?.viteEnvironments,
           hyperdrives,
           // Substitute `Worker.URL` sentinels so the Vite dev server inlines
