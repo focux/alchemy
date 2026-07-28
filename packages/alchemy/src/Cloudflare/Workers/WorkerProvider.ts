@@ -1624,12 +1624,18 @@ export const LiveWorkerProvider = () =>
         metadataBindings: WorkerBinding[],
         news: WorkerProps,
         accountId: string,
+        workerName: string,
       ) => {
         metadataBindings.push(
           {
             type: "plain_text",
             name: "ALCHEMY_PHASE",
             text: "runtime",
+          },
+          {
+            type: "plain_text",
+            name: "ALCHEMY_WORKER_NAME",
+            text: workerName,
           },
           {
             type: "plain_text",
@@ -1963,7 +1969,12 @@ export const LiveWorkerProvider = () =>
               : item,
           ),
         );
-        appendAlchemyAndEnvBindings(metadataBindings, news, accountId);
+        appendAlchemyAndEnvBindings(
+          metadataBindings,
+          news,
+          accountId,
+          parentName,
+        );
         const compatibility = getCompatibility(news);
         yield* session.note(`Uploading version of ${parentName} ...`);
         const created = yield* workers
@@ -2210,7 +2221,7 @@ export const LiveWorkerProvider = () =>
             name: "ASSETS",
           });
         }
-        appendAlchemyAndEnvBindings(metadataBindings, news, accountId);
+        appendAlchemyAndEnvBindings(metadataBindings, news, accountId, name);
         yield* Effect.logInfo(
           `Cloudflare Worker ${olds ? "update" : "create"}: uploading script for ${name}`,
         );
