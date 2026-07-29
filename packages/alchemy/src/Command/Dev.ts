@@ -6,11 +6,12 @@ import * as ProviderLayer from "../Local/ProviderLayer.ts";
 import * as Provider from "../Provider.ts";
 import { Resource } from "../Resource.ts";
 import {
-  CommandError,
   CommandExecutor,
   UnexpectedExit,
+  makeCommandError,
   type CommandProps,
 } from "./Command.ts";
+import { makeCommandRedactor } from "./Redaction.ts";
 
 export interface DevProps extends CommandProps {}
 
@@ -116,6 +117,7 @@ export const DevProviderLocal = () =>
         // is killed when the helper closes the scope on restart/delete.
         start: Effect.fn(function* ({ news: props, invalidate }) {
           const child = yield* spawn(props);
+          const redactor = makeCommandRedactor(props.env);
 
           let buffer = "";
           // A non-local URL seen so far (docs link, error page, update notice,
@@ -127,10 +129,11 @@ export const DevProviderLocal = () =>
 
           const mirror = (sink: "stdout" | "stderr") =>
             child[sink].pipe(
-              Stream.tap((chunk) =>
-                Effect.sync(() => process[sink].write(chunk)),
-              ),
               Stream.decodeText,
+              redactor.stream,
+              Stream.tap((text) =>
+                Effect.sync(() => process[sink].write(text)),
+              ),
               Stream.tap((text) =>
                 Effect.sync(() => {
                   if (Deferred.isDoneUnsafe(deferred)) return;
@@ -165,19 +168,12 @@ export const DevProviderLocal = () =>
               }),
             ),
             child.exitCode.pipe(
-              Effect.mapError(
-                (error) =>
-                  new CommandError({
-                    command: props.command,
-                    reason: error.reason,
-                  }),
-              ),
-              Effect.flatMap(
-                (exitCode) =>
-                  new CommandError({
-                    command: props.command,
-                    reason: new UnexpectedExit({ exitCode, stderr: buffer }),
-                  }),
+              Effect.mapError((error) => makeCommandError(props, error.reason)),
+              Effect.flatMap((exitCode) =>
+                makeCommandError(
+                  props,
+                  new UnexpectedExit({ exitCode, stderr: buffer }),
+                ),
               ),
             ),
           ]);

@@ -2879,6 +2879,203 @@ describe("engine-level adoption", () => {
       ) as Effect.Effect<Plan.Plan<A>, any, State>;
     }) as Effect.Effect<Plan.Plan<A>, any, State>;
 
+  const creatingWithoutAttrs = {
+    instanceId,
+    providerVersion: 0,
+    logicalId: "Recovering",
+    fqn: "Recovering",
+    namespace: undefined,
+    resourceType: "Test.TestResource",
+    status: "creating" as const,
+    props: { string: "hello" },
+    attr: undefined,
+    downstream: [],
+    bindings: [],
+  } satisfies ResourceState;
+
+  test.provider("cold adoption reconciles with olds undefined", (scratch) =>
+    Effect.gen(function* () {
+      let creates = 0;
+      let updates = 0;
+      const hooks = {
+        read: () => Effect.succeed(ownedAttrs),
+        create: () =>
+          Effect.sync(() => {
+            creates++;
+          }),
+        update: () =>
+          Effect.sync(() => {
+            updates++;
+          }),
+      };
+
+      yield* scratch
+        .deploy(
+          Effect.gen(function* () {
+            yield* TestResource("Adopted", { string: "hello" });
+          }),
+        )
+        .pipe(Effect.provideService(TestResourceHooks, hooks));
+
+      expect(creates).toBe(1);
+      expect(updates).toBe(0);
+
+      const state = yield* yield* State;
+      expect(
+        yield* state.get({
+          stack: scratch.name,
+          stage: TEST_STAGE,
+          fqn: "Adopted",
+        }),
+      ).toMatchObject({
+        status: "updated",
+        props: { string: "hello" },
+      });
+    }),
+  );
+
+  test.provider(
+    "cold adoption keeps olds undefined after a failed first reconcile",
+    (scratch) =>
+      Effect.gen(function* () {
+        let creates = 0;
+        let updates = 0;
+        const hooks = {
+          read: () => Effect.succeed(ownedAttrs),
+          create: () =>
+            Effect.suspend(() => {
+              creates++;
+              return creates === 1
+                ? Effect.fail(new Error("first adoption reconcile failed"))
+                : Effect.void;
+            }),
+          update: () =>
+            Effect.sync(() => {
+              updates++;
+            }),
+        };
+        const program = () =>
+          Effect.gen(function* () {
+            yield* TestResource("Adopted", { string: "hello" });
+          });
+
+        const first = yield* scratch
+          .deploy(program())
+          .pipe(Effect.provideService(TestResourceHooks, hooks), Effect.exit);
+        expect(Exit.isFailure(first)).toBe(true);
+        expect(creates).toBe(1);
+        expect(updates).toBe(0);
+
+        const state = yield* yield* State;
+        expect(
+          yield* state.get({
+            stack: scratch.name,
+            stage: TEST_STAGE,
+            fqn: "Adopted",
+          }),
+        ).toMatchObject({
+          status: "updating",
+          adopting: true,
+        });
+
+        yield* scratch
+          .deploy(program())
+          .pipe(Effect.provideService(TestResourceHooks, hooks));
+
+        expect(creates).toBe(2);
+        expect(updates).toBe(0);
+        const completed = yield* state.get({
+          stack: scratch.name,
+          stage: TEST_STAGE,
+          fqn: "Adopted",
+        });
+        expect(completed).toMatchObject({ status: "updated" });
+        expect((completed as any)?.adopting).toBeUndefined();
+      }),
+  );
+
+  test(
+    "recovered Unowned attrs require explicit adoption",
+    Effect.gen(function* () {
+      yield* seed({ Recovering: creatingWithoutAttrs });
+
+      const exit = yield* makeAdoptPlan(
+        Effect.gen(function* () {
+          yield* TestResource("Recovering", { string: "hello" });
+        }),
+        {
+          adopt: false,
+          readHook: () => Effect.succeed(Unowned(ownedAttrs)),
+        },
+      ).pipe(Effect.exit);
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        const reason = exit.cause.reasons.find(Cause.isFailReason);
+        expect((reason?.error as any)?._tag).toBe("OwnedBySomeoneElse");
+        expect((reason?.error as any)?.resourceType).toBe("Test.TestResource");
+      }
+    }),
+  );
+
+  test(
+    "explicit adoption strips Unowned from recovered attrs",
+    Effect.gen(function* () {
+      yield* seed({ Recovering: creatingWithoutAttrs });
+
+      const plan = yield* makeAdoptPlan(
+        Effect.gen(function* () {
+          yield* TestResource("Recovering", { string: "hello" });
+        }),
+        {
+          adopt: true,
+          readHook: () => Effect.succeed(Unowned(ownedAttrs)),
+        },
+      );
+
+      const recovered = plan.resources.Recovering!;
+      expect(recovered.action).toBe("create");
+      expect(Unowned.is((recovered.state as any).attr)).toBe(false);
+      expect(
+        Object.getOwnPropertySymbols((recovered.state as any).attr),
+      ).toEqual([]);
+    }),
+  );
+
+  test(
+    "recovered attrs still diff immutable desired changes",
+    Effect.gen(function* () {
+      yield* seed({
+        Recovering: {
+          ...creatingWithoutAttrs,
+          props: { replaceString: "old" },
+        },
+      });
+
+      const plan = yield* makeAdoptPlan(
+        Effect.gen(function* () {
+          yield* TestResource("Recovering", { replaceString: "new" });
+        }),
+        {
+          readHook: () =>
+            Effect.succeed({
+              ...ownedAttrs,
+              replaceString: "old",
+            }),
+        },
+      );
+
+      expect(plan.resources.Recovering).toMatchObject({
+        action: "replace",
+        props: { replaceString: "new" },
+        state: {
+          status: "creating",
+          attr: { replaceString: "old" },
+        },
+      });
+    }),
+  );
+
   test(
     "owned read result is silently adopted (no AdoptPolicy needed) and forced to update",
     Effect.gen(function* () {
@@ -2894,6 +3091,13 @@ describe("engine-level adoption", () => {
       // (owned) attrs, the cloud resource may carry drift the engine
       // can't detect from `props` alone.
       expect(plan.resources.Adopted!.action).toBe("update");
+      expect(plan.resources.Adopted).toMatchObject({
+        adopting: true,
+        state: {
+          status: "created",
+          attr: { string: "hello" },
+        },
+      });
 
       // Planning no longer persists the adopted state (issue #793): it rides
       // on the plan node and is only committed to the store at apply time.
@@ -2930,6 +3134,10 @@ describe("engine-level adoption", () => {
       // logical id (a plain noop would leave the resource looking
       // foreign-owned to subsequent deploys).
       expect(plan.resources.Adopted!.action).toBe("update");
+      expect(plan.resources.Adopted).toMatchObject({
+        adopting: true,
+        state: { status: "created" },
+      });
 
       // The adopted state rides on the plan node, not the store (issue #793).
       const node = plan.resources.Adopted!;
@@ -3009,6 +3217,10 @@ describe("engine-level adoption", () => {
       );
 
       expect(plan.resources.Adopted!.action).toBe("update");
+      expect(plan.resources.Adopted).toMatchObject({
+        adopting: true,
+        state: { status: "created" },
+      });
 
       // Adopted state rides on the plan node; planning persists nothing
       // (issue #793).

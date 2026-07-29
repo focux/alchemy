@@ -130,6 +130,8 @@ export interface Update<
   R extends ResourceLike = ResourceLike,
 > extends BaseNode<R> {
   action: "update";
+  /** True while this is the first reconcile after a cold adoption. */
+  adopting?: boolean;
   props: R["Props"];
   state:
     | CreatedResourceState
@@ -951,7 +953,7 @@ export const make = <A>(
                     output: oldState.attr,
                   })
                   .pipe(providePlanScope(fqn, oldState.instanceId));
-                if (attr) {
+                if (attr !== undefined) {
                   // The recovered resource may be foreign: our interrupted
                   // create could have lost a name race, or died before
                   // stamping ownership. Route `Unowned` through the same
@@ -974,11 +976,12 @@ export const make = <A>(
                       });
                     }
                   }
-                  return Node<Create>({
-                    action: "create",
-                    props: news,
-                    state: { ...oldState, attr: stripUnowned(attr) },
-                  });
+                  // Continue through the normal diff below with the recovered
+                  // live snapshot. Desired props may have changed while the
+                  // previous create was interrupted; bypassing diff here can
+                  // drive an immutable change through reconcile and falsely
+                  // persist the old physical resource as converged.
+                  oldState = { ...oldState, attr: stripUnowned(attr) };
                 }
               }
             }
@@ -1178,6 +1181,7 @@ export const make = <A>(
               // Stable created/updated resources follow the normal CRUD mapping.
               return Node<Update>({
                 action: "update",
+                adopting: forceUpdateAfterAdoption,
                 props: news,
                 state: oldState,
               });
