@@ -444,12 +444,7 @@ export const ApplicationProvider = () =>
         const created = yield* zeroTrust
           .createAccessApplicationForAccount({
             accountId,
-            // Cloudflare requires a `domain` body field, but ignores it for
-            // warp (auto-set). Sending an empty string is safe and keeps
-            // distilled's request shape valid for the non-warp case where
-            // the caller forgot to pass one — server validation will then
-            // reject with a clear error rather than a TypeScript surprise.
-            domain: body.domain ?? "",
+            domain: body.domain,
             type: news.type,
             name: resolvedName,
             sessionDuration: body.sessionDuration,
@@ -502,7 +497,7 @@ export const ApplicationProvider = () =>
           .updateAccessApplicationForAccount({
             accountId,
             appId: observed.id,
-            domain: body.domain ?? observed.domain ?? "",
+            domain: body.domain ?? observed.domain,
             type: news.type,
             name: resolvedName,
             sessionDuration: body.sessionDuration,
