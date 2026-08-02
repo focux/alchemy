@@ -31,6 +31,7 @@ import { localRuntimeServices } from "../LocalRuntime.ts";
 import { CloudflareLogs } from "../Logs.ts";
 import { resolveZoneId } from "../Zone/lookup.ts";
 import {
+  getAssetsPathPrefix,
   mergeAssetsConfigFiles,
   readAssets,
   readAssetsConfigFiles,
@@ -2080,7 +2081,7 @@ export const LiveWorkerProvider = () =>
         // (~0.5s), which is only needed for vite-based workers at build time —
         // not for every Worker definition at module-load time.
         const Vite = yield* Effect.promise(() => import("./Vite.ts"));
-        const { clientDirectory, serverBundle, externalWorkspaces } =
+        const { clientDirectory, base, serverBundle, externalWorkspaces } =
           yield* Vite.viteBuild(
             props.vite?.rootDir,
             Object.fromEntries(
@@ -2148,6 +2149,10 @@ export const LiveWorkerProvider = () =>
                     props.vite?.rootDir ?? process.cwd(),
                     clientDirectory,
                   ),
+                  // The resolved Vite `base` is what rewrote the URLs in
+                  // the emitted HTML, so it is the only prefix the
+                  // manifest can agree with.
+                  base,
                 })
               : Effect.undefined,
             serverBundle,
@@ -2310,8 +2315,22 @@ export const LiveWorkerProvider = () =>
         output: Worker["Attributes"] | undefined,
       ) => {
         if (!Predicate.hasProperty(assets, "hash")) return undefined;
-        const { directory, hash, ...config } = assets;
-        return { directory, config, hash, skip: hash === output?.hash?.assets };
+        // `base` shapes the uploaded manifest paths (see `readAssets`); it
+        // is alchemy-only and must not leak into the API's asset config.
+        const { directory, hash, base, ...config } = assets;
+        // `base` re-keys the manifest without changing the build output, so
+        // a caller-supplied hash alone would let the skip path carry a
+        // stale root-keyed manifest forward across a `base` change. Salt
+        // the stored/compared hash with the prefix; unprefixed deploys keep
+        // their existing hashes.
+        const pathPrefix = getAssetsPathPrefix(base);
+        const effectiveHash = pathPrefix ? `${hash}#base=${pathPrefix}` : hash;
+        return {
+          directory,
+          config,
+          hash: effectiveHash,
+          skip: effectiveHash === output?.hash?.assets,
+        };
       };
 
       /**
