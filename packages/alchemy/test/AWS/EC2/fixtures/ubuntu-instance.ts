@@ -7,38 +7,34 @@ import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 /**
- * Alchemy-managed EC2 key pair granting SSH access to the instance. Exported so
- * the test can resolve it in the same deploy and read its (redacted) private
- * key — yielding the same logical id returns the same resource.
+ * Alchemy-managed EC2 key pair granting SSH access to the Ubuntu instance for
+ * debugging bootstrap failures.
  */
-export const keyPair = AWS.EC2.KeyPair("Ec2E2EKeyPair", {
+export const ubuntuKeyPair = AWS.EC2.KeyPair("Ec2UbuntuKeyPair", {
   keyType: "ed25519",
 });
 
 /**
- * End-to-end fixture for a hosted `AWS.EC2.Instance`: a long-running server.
- *
- * The props Effect provisions the networking (a public-subnet VPC) and the
- * instance's security group, then launches the instance into it. The program
- * Effect registers a `ServerHost.run` background loop (the #706 pattern) and
- * returns a `{ fetch }` handler that the instance's Bun HTTP server serves on
- * `port`. `/ticks` reports the loop counter so the test can prove the
- * background loop runs inside the deployed instance.
+ * Ubuntu 24.04 variant of the hosted-instance e2e fixture (issues #1027 and
+ * #1028): Ubuntu AMIs ship without `unzip`, `dnf`, or `yum`, so serving HTTP
+ * from the hosted runtime proves the bootstrap's `apt-get` branch installed
+ * `unzip`, the AWS CLI install + S3 bundle sync succeeded, and the systemd
+ * unit's `bun --no-install` start worked end-to-end.
  */
-export default class TestInstance extends AWS.EC2.Instance<TestInstance>()(
-  "Ec2E2EInstance",
+export default class TestUbuntuInstance extends AWS.EC2.Instance<TestUbuntuInstance>()(
+  "Ec2UbuntuE2EInstance",
   Effect.gen(function* () {
     // This composition is re-executed inside the deployed instance's bundle:
     // the AMI lookup is an `Output` resolved at plan/deploy time only, and
     // resource yields resolve to references at runtime, so no runtime guard
     // is needed.
-    const network = yield* AWS.EC2.Network("Ec2E2ENetwork", {
-      cidrBlock: "10.81.0.0/16",
+    const network = yield* AWS.EC2.Network("Ec2UbuntuE2ENetwork", {
+      cidrBlock: "10.82.0.0/16",
       availabilityZones: 1,
     });
-    const securityGroup = yield* AWS.EC2.SecurityGroup("Ec2E2ESg", {
+    const securityGroup = yield* AWS.EC2.SecurityGroup("Ec2UbuntuE2ESg", {
       vpcId: network.vpcId,
-      description: "alchemy ec2 instance e2e",
+      description: "alchemy ec2 ubuntu instance e2e",
       ingress: [
         {
           ipProtocol: "tcp",
@@ -64,22 +60,17 @@ export default class TestInstance extends AWS.EC2.Instance<TestInstance>()(
       ],
     });
 
-    // An Alchemy-managed EC2 key pair grants SSH access to the instance.
-    const key = yield* keyPair;
+    const key = yield* ubuntuKeyPair;
 
     return {
       main: import.meta.filename,
-      imageId: AWS.EC2.amazonLinux2023(),
+      imageId: AWS.EC2.ubuntu2404(),
       instanceType: "t3.small",
       subnetId: network.publicSubnetIds[0],
       securityGroupIds: [securityGroup.groupId],
       associatePublicIpAddress: true,
       port: 3000,
       keyName: key.keyName,
-      // SSM access so the instance is manageable via Session Manager.
-      roleManagedPolicyArns: [
-        "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
-      ],
     };
   }),
   Effect.gen(function* () {
@@ -106,7 +97,7 @@ export default class TestInstance extends AWS.EC2.Instance<TestInstance>()(
             ticks: yield* Ref.get(ticks),
           });
         }
-        return HttpServerResponse.text("hello from ec2 instance");
+        return HttpServerResponse.text("hello from ubuntu ec2 instance");
       }),
     };
   }),
