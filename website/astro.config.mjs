@@ -912,6 +912,10 @@ export default defineConfig({
               label: "Email",
               items: [
                 {
+                  label: "Sending & managing email",
+                  link: "/aws/email/sending",
+                },
+                {
                   label: "Receiving inbound email",
                   link: "/aws/email/receiving",
                 },
