@@ -14,7 +14,6 @@ import {
 import { asEffect } from "../../Util/types.ts";
 import type { Providers } from "../Providers.ts";
 import type { AssetsConfig } from "../Workers/Assets.ts";
-import { isContainerDecl } from "../Workers/WorkerAsyncBindings.ts";
 import {
   Worker,
   type NormalizedBindings,
@@ -22,6 +21,7 @@ import {
   type WorkerBindingProps,
   type WorkerProps,
 } from "../Workers/Worker.ts";
+import { isContainerDecl } from "../Workers/WorkerAsyncBindings.ts";
 
 export interface StaticSiteProps<Bindings extends WorkerBindingProps = {}>
   extends
@@ -293,7 +293,7 @@ const makeStaticSite = <
       assets: build
         ? cast({
             directory: build.outdir,
-            hash: build.hash,
+            hash: build.hash.output,
             ...props.assets,
           })
         : undefined,
