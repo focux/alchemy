@@ -1,22 +1,27 @@
 import { layerRuntime } from "@distilled.cloud/cloudflare-runtime";
-import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as NodeV8 from "node:v8";
-import * as RpcServerEnvironment from "../../Local/RpcServerEnvironment.ts";
-import { PlatformServices, runMain } from "../../Util/PlatformServices.ts";
+import {
+  Artifacts,
+  createArtifactStore,
+  makeScopedArtifacts,
+} from "../../Artifacts.ts";
 import { CloudflareAuth } from "../Auth/AuthProvider.ts";
 import * as Credentials from "../Credentials.ts";
+import * as RpcServerEnvironment from "../../Local/RpcServerEnvironment.ts";
+import { PlatformServices, runMain } from "../../Util/PlatformServices.ts";
 import { materializeRuntimeBindings } from "./RuntimeBindings.ts";
-import * as Vite from "./Vite.ts";
+import { loadSource, SourceProviderError } from "./Source.ts";
+import * as Vite from "./Sources/Vite.ts";
 import {
   DEFAULT_DEV_PORT,
+  type ViteChildConfig,
   VITE_CHILD_READY_PREFIX,
   VITE_CHILD_READY_SUFFIX,
-  type ViteChildConfig,
 } from "./ViteChild.shared.ts";
 
 const readConfig = Effect.gen(function* () {
@@ -64,40 +69,83 @@ const program = Effect.scoped(
         stack: config.stack,
       },
     );
-    const devServer = yield* Vite.viteDev(
-      config.rootDir,
-      config.env,
-      {
-        main,
-        compatibilityDate: compatibility.date,
-        compatibilityFlags: compatibility.flags,
-        viteEnvironments,
-        worker: { ...runtimeWorker, bindings },
-        context: runtimeContext,
-      },
-      {
-        // Match Alchemy's local Worker port range. The stable Alchemy proxy
-        // normally occupies the first port in the range, so the internal
-        // Vite server must be allowed to advance.
-        port: DEFAULT_DEV_PORT,
-        strictPort: false,
-      },
-    );
-    const url = devServer.resolvedUrls?.local[0];
+    const source = config.source;
+    const url = source
+      ? yield* loadSource(source.descriptor).pipe(
+          // `loadSource` is typed against the full `SourceServices` union
+          // (which includes the per-run Artifacts cache the live provider
+          // supplies); the dev child has no run-scoped cache, so hand the
+          // module a fresh one.
+          Effect.provideService(
+            Artifacts,
+            makeScopedArtifacts(createArtifactStore(), source.id),
+          ),
+          Effect.flatMap((provider) =>
+            provider.dev({
+              id: source.id,
+              workerName: config.worker.name,
+              compatibility,
+              entry: { kind: "external" },
+              stack: config.stack,
+              env: config.env,
+              extraOptions: undefined,
+              assets: source.assets,
+              worker: {
+                bindings,
+                durableObjectNamespaces: config.worker.durableObjectNamespaces,
+                hyperdrives: config.worker.hyperdrives,
+                queueConsumers: Effect.succeed(config.worker.queueConsumers),
+                assets: config.worker.assets,
+              },
+              runtimeContext,
+            }),
+          ),
+          Effect.flatMap((handle) =>
+            handle.mode === "server"
+              ? Effect.succeed(handle.url.toString())
+              : Effect.fail(
+                  new SourceProviderError({
+                    provider: source.descriptor.provider,
+                    message:
+                      "A source declared devMode 'server' but returned a bundle-mode dev handle.",
+                  }),
+                ),
+          ),
+        )
+      : yield* Vite.viteDev(
+          config.rootDir,
+          config.env,
+          {
+            main,
+            compatibilityDate: compatibility.date,
+            compatibilityFlags: compatibility.flags,
+            viteEnvironments,
+            worker: { ...runtimeWorker, bindings },
+            context: runtimeContext,
+          },
+          {
+            // Match Alchemy's local Worker port range. The stable Alchemy proxy
+            // normally occupies the first port in the range, so the internal
+            // Vite server must be allowed to advance.
+            port: DEFAULT_DEV_PORT,
+            strictPort: false,
+          },
+        ).pipe(Effect.map((server) => server.resolvedUrls?.local[0]));
     if (!url) {
-      return yield* Effect.die("Vite child started without a local URL");
+      return yield* Effect.die("Dev server child started without a local URL");
     }
-    yield* Console.log(
-      `${VITE_CHILD_READY_PREFIX}${url}${VITE_CHILD_READY_SUFFIX}`,
-    );
+    yield* Effect.sync(() => {
+      process.stdout.write(
+        `${VITE_CHILD_READY_PREFIX}${url}${VITE_CHILD_READY_SUFFIX}\n`,
+      );
+    });
     return yield* Effect.never;
   }),
 );
 
 runMain(
   program.pipe(
-    Effect.provide(
-      RpcServerEnvironment.fromEnv().pipe(Layer.provideMerge(PlatformServices)),
-    ),
+    Effect.provide(RpcServerEnvironment.fromEnv()),
+    Effect.provide(PlatformServices),
   ),
 );
