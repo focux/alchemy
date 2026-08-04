@@ -1238,8 +1238,8 @@ export const toRuntimeBinding = Effect.fn(function* (
         : SecretsStore.remote(b.name, b.storeId, b.secretName);
     case "send_email":
       // Local emulation validates and persists sent mail as `.eml` files
-      // under the local storage's `email/` dir; `dev: { remote: true }`
-      // opts into the real Email service instead.
+      // under the local storage's `email/` dir; `Alchemy.remote()` on the
+      // descriptor opts into the real Email service instead.
       return SendEmail[devRemote?.[b.name] ? "remote" : "local"]({
         binding: b.name,
         destinationAddress: b.destinationAddress,

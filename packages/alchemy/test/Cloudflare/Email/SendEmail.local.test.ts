@@ -9,6 +9,7 @@ import { MinimumLogLevel } from "effect/References";
 import * as Schedule from "effect/Schedule";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as pathe from "pathe";
+import LocalSendEmailWorker from "./fixtures/local-worker.ts";
 import RemoteEmailWorker from "./fixtures/remote-email-worker.ts";
 
 // `dev: true` runs local providers behind the RPC sidecar proxy by default,
@@ -173,12 +174,62 @@ test.provider(
   { timeout: 120_000 },
 );
 
+/**
+ * `Alchemy.remote()` on the descriptor opts a `send_email` binding OUT of
+ * local emulation, per binding: one dev worker binds a default (simulated)
+ * descriptor and a `remote()`-piped one side by side. The simulator accepts
+ * an unrestricted send from an arbitrary address, while the live Email
+ * service enforces sender/destination verification and rejects the same
+ * pair — proof the call was served by the real binding, with no mail
+ * delivered on either route.
+ */
+test.provider(
+  "Alchemy.remote() binds the live service alongside a simulated one",
+  (stack) =>
+    Effect.gen(function* () {
+      yield* stack.destroy();
+
+      const deployed = yield* stack.deploy(
+        Effect.gen(function* () {
+          const worker = yield* LocalSendEmailWorker;
+          return { url: worker.url.as<string>() };
+        }),
+      );
+
+      // The worker itself is served by the local dev proxy.
+      expect(deployed.url).toMatch(/^http:\/\/localhost:\d+$/);
+
+      const params =
+        "from=noreply%40alchemy-local-test.invalid&to=nobody%40example.com";
+
+      // The simulator accepts the unrestricted send without delivering.
+      const stubRes = yield* getReady(
+        `${deployed.url}/send-stub?${params}`,
+        [200],
+      );
+      const stub = (yield* stubRes.json) as { ok: boolean };
+      expect(stub.ok).toBe(true);
+
+      // The remote()-opted binding reaches the live Email service, which
+      // rejects the unverified sender/destination pair.
+      const liveRes = yield* getReady(
+        `${deployed.url}/send-live?${params}`,
+        [200],
+      );
+      const live = (yield* liveRes.json) as { ok: boolean; message?: string };
+      expect(live.ok).toBe(false);
+
+      yield* stack.destroy();
+    }).pipe(logLevel),
+  { timeout: 120_000 },
+);
+
 const FROM = process.env.CLOUDFLARE_TEST_EMAIL_FROM;
 const TO = process.env.CLOUDFLARE_TEST_EMAIL_TO;
 const skipRemote = !FROM || !TO;
 
 /**
- * `dev: { remote: true }` opts the binding OUT of local emulation: the
+ * `Alchemy.remote()` opts the binding OUT of local emulation: the
  * locally-served worker proxies `send()` through the remote-bindings preview
  * session to the real Cloudflare Email service. Requires a verified
  * sender/destination pair (CLOUDFLARE_TEST_EMAIL_FROM / _TO), same as the
@@ -186,7 +237,7 @@ const skipRemote = !FROM || !TO;
  * the real `send()` is the assertion.
  */
 test.provider.skipIf(skipRemote)(
-  "dev remote: true proxies send() to the real Email service",
+  "Alchemy.remote() proxies send() to the real Email service",
   (stack) =>
     Effect.gen(function* () {
       yield* stack.destroy();

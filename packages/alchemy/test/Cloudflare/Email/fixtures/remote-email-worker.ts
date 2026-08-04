@@ -1,4 +1,5 @@
 import * as Cloudflare from "@/Cloudflare/index.ts";
+import { remote } from "@/ProviderMode.ts";
 import * as Effect from "effect/Effect";
 import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
@@ -8,15 +9,14 @@ const destinationAddress = process.env.CLOUDFLARE_TEST_EMAIL_TO;
 
 /**
  * `send_email` descriptor opted into the REAL binding under `alchemy dev`
- * (`dev: { remote: true }`): the local worker proxies `send()` through the
+ * via `Alchemy.remote()`: the local worker proxies `send()` through the
  * remote-bindings preview session to Cloudflare's live Email service, so it
  * needs a verified sender/destination pair from the env.
  */
 export const RemoteEmail = Cloudflare.Email.SendEmail("RemoteEmail", {
   allowedSenderAddresses: senderAddress ? [senderAddress] : undefined,
   destinationAddress,
-  dev: { remote: true },
-});
+}).pipe(remote());
 
 export default class RemoteEmailWorker extends Cloudflare.Worker<RemoteEmailWorker>()(
   "SendEmailRemoteDevTestWorker",
