@@ -1,3 +1,11 @@
+## v2.0.0-beta.70
+
+*No significant changes*
+
+##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/alchemy-run/alchemy/compare/v2.0.0-beta.69...HEAD)
+
+---
+
 ## v2.0.0-beta.69
 
 ### &nbsp;&nbsp;&nbsp;🚀 Features
