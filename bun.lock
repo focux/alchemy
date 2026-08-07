@@ -1666,6 +1666,7 @@
   },
   "patchedDependencies": {
     "starlight-blog@0.28.0": "patches/starlight-blog@0.28.0.patch",
+    "drizzle-orm@1.0.0-rc.4": "patches/drizzle-orm@1.0.0-rc.4.patch",
     "@astrojs/starlight@0.41.7": "patches/@astrojs%2Fstarlight@0.41.7.patch",
   },
   "overrides": {
