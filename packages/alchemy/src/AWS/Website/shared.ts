@@ -1,4 +1,5 @@
 import type { Input } from "../../Input.ts";
+import type { AssetFileOption } from "./AssetDeployment.ts";
 import type { Bucket } from "../S3/Bucket.ts";
 
 export interface WebsiteDomainProps {
@@ -144,14 +145,15 @@ export interface StaticSiteAssetsProps {
   textEncoding?: WebsiteTextEncoding;
 }
 
-export interface StaticSiteRouterProps {
+/**
+ * Static-asset upload configuration for the website composites:
+ * {@link StaticSiteAssetsProps} plus per-file overrides.
+ */
+export interface WebsiteAssetsConfig extends StaticSiteAssetsProps {
   /**
-   * Optional path prefix used when composing with `AWS.Website.Router`.
-   * This is metadata only; `StaticSite` still returns `routeTarget` for
-   * explicit router composition.
-   * @default "/"
+   * Per-file overrides for content type and cache-control.
    */
-  path?: string;
+  fileOptions?: AssetFileOption[];
 }
 
 export interface RouterUrlRouteProps {
@@ -231,11 +233,6 @@ export interface RouterProps {
    */
   tags?: Record<string, string>;
 }
-
-/**
- * The bucket route a `StaticSite` exposes for explicit `Router` composition.
- */
-export type StaticSiteRouteTarget = RouterBucketRouteProps;
 
 /**
  * Route targets returned by `SsrSite` for composition with

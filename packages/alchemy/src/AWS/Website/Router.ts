@@ -16,8 +16,11 @@ import { Invalidation } from "../CloudFront/Invalidation.ts";
 import { KeyValueStore } from "../CloudFront/KeyValueStore.ts";
 import { KvEntries } from "../CloudFront/KvEntries.ts";
 import { KvRoutesUpdate } from "../CloudFront/KvRoutesUpdate.ts";
-import { MANAGED_CACHING_OPTIMIZED_POLICY_ID } from "../CloudFront/ManagedPolicies.ts";
+import { CachePolicy } from "../CloudFront/CachePolicy.ts";
+import { MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID } from "../CloudFront/ManagedPolicies.ts";
+import type { PolicyStatement } from "../IAM/Policy.ts";
 import { Record as Route53Record } from "../Route53/Record.ts";
+import type { Bucket } from "../S3/Bucket.ts";
 import {
   CF_BLOCK_CLOUDFRONT_URL_INJECTION,
   CF_ROUTER_INJECTION,
@@ -74,8 +77,8 @@ import type { RouterProps } from "./shared.ts";
  * });
  * ```
  */
-export const Router = (id: string, props: RouterProps) =>
-  Effect.gen(function* () {
+export const Router = Effect.fn("AWS.Website.Router")(
+  function* (id: string, props: RouterProps) {
     const domain = props.domain;
 
     if (domain && domain.dns === false && !domain.cert) {
@@ -148,6 +151,7 @@ export const Router = (id: string, props: RouterProps) =>
     ];
 
     const inlineRouteEntries: Record<string, Input<string>> = {};
+    const routeBuckets: Bucket[] = [];
 
     if (props.routes) {
       let routeIndex = 0;
@@ -178,6 +182,9 @@ export const Router = (id: string, props: RouterProps) =>
           });
         } else {
           const bucketRoute = route as any;
+          if (typeof bucketRoute.bucket !== "string") {
+            routeBuckets.push(bucketRoute.bucket as Bucket);
+          }
           const bucketDomain =
             typeof bucketRoute.bucket === "string"
               ? bucketRoute.bucket
@@ -209,6 +216,28 @@ export const Router = (id: string, props: RouterProps) =>
       });
     }
 
+    // One behavior serves every attached site — static AND server-rendered
+    // — so the cache policy must not cache responses that carry no
+    // Cache-Control (SSR pages), while still honoring the immutable
+    // Cache-Control the asset uploader sets. Managed CachingOptimized
+    // would cache header-less SSR responses for a day. The
+    // AllViewerExceptHostHeader origin-request policy forwards viewer
+    // headers/cookies/query to server origins (required for Lambda URLs,
+    // whose Host must stay the function URL's own domain).
+    const cachePolicy = yield* CachePolicy("CachePolicy", {
+      comment: `${id} router cache policy`,
+      minTTL: 0,
+      defaultTTL: 0,
+      maxTTL: "365 days",
+      parametersInCacheKeyAndForwardedToOrigin: {
+        EnableAcceptEncodingGzip: true,
+        EnableAcceptEncodingBrotli: true,
+        QueryStringsConfig: { QueryStringBehavior: "all" },
+        HeadersConfig: { HeaderBehavior: "none" },
+        CookiesConfig: { CookieBehavior: "none" },
+      },
+    });
+
     const distribution = yield* Distribution("Distribution", {
       aliases: domain
         ? [domain.name, ...(domain.aliases ?? []), ...(domain.redirects ?? [])]
@@ -216,7 +245,7 @@ export const Router = (id: string, props: RouterProps) =>
       origins: [
         {
           id: "default",
-          domainName: "placeholder.sst.dev",
+          domainName: "placeholder.alchemy.run",
           customOriginConfig: {
             httpPort: 80,
             httpsPort: 443,
@@ -240,7 +269,8 @@ export const Router = (id: string, props: RouterProps) =>
         ],
         cachedMethods: ["GET", "HEAD"],
         compress: true,
-        cachePolicyId: MANAGED_CACHING_OPTIMIZED_POLICY_ID,
+        cachePolicyId: cachePolicy.cachePolicyId,
+        originRequestPolicyId: MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
         functionAssociations,
       },
       viewerCertificate: certificate
@@ -251,6 +281,28 @@ export const Router = (id: string, props: RouterProps) =>
           }
         : undefined,
       tags: props.tags,
+    });
+
+    // Inline bucket routes are served through the router's distribution with
+    // OAC-signed requests (see `setS3Origin` in cfcode.ts) — each bucket must
+    // allow this distribution or every request 403s.
+    yield* Effect.forEach(routeBuckets, (routeBucket) => {
+      const bucketPolicy: PolicyStatement = {
+        Effect: "Allow",
+        Principal: {
+          Service: "cloudfront.amazonaws.com",
+        },
+        Action: ["s3:GetObject"],
+        Resource: [Output.interpolate`${routeBucket.bucketArn}/*` as any],
+        Condition: {
+          StringEquals: {
+            "AWS:SourceArn": distribution.distributionArn as any,
+          },
+        },
+      };
+      return routeBucket.bind`AWS.S3.Policy(CloudFront, ${routeBucket})`({
+        policyStatements: [bucketPolicy],
+      });
     });
 
     const records =
@@ -300,11 +352,14 @@ export const Router = (id: string, props: RouterProps) =>
       kvStoreArn: kvStore.keyValueStoreArn as Input<string>,
       kvNamespace,
       distributionId: distribution.distributionId as Input<string>,
+      distributionArn: distribution.distributionArn as Input<string>,
       url: domain
         ? Output.interpolate`https://${domain.name}`
         : Output.interpolate`https://${distribution.domainName}`,
     };
-  }).pipe(Namespace.push(id));
+  },
+  (effect, id: string, _props: RouterProps) => effect.pipe(Namespace.push(id)),
+);
 
 const buildRouterRequestFunctionCode = ({
   kvNamespace,

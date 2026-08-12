@@ -1,7 +1,5 @@
 import * as Effect from "effect/Effect";
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
-import path from "node:path";
 import * as Command from "../../Command/index.ts";
 import { toPath } from "../../FQN.ts";
 import type { Input } from "../../Input.ts";
@@ -10,24 +8,29 @@ import * as Output from "../../Output.ts";
 import { Stack } from "../../Stack.ts";
 import { Stage } from "../../Stage.ts";
 import { Certificate } from "../ACM/Certificate.ts";
+import { CachePolicy } from "../CloudFront/CachePolicy.ts";
 import { Distribution } from "../CloudFront/Distribution.ts";
 import { Function as CloudFrontFunction } from "../CloudFront/Function.ts";
 import { Invalidation } from "../CloudFront/Invalidation.ts";
 import { KeyValueStore } from "../CloudFront/KeyValueStore.ts";
 import { KvEntries } from "../CloudFront/KvEntries.ts";
 import { KvRoutesUpdate } from "../CloudFront/KvRoutesUpdate.ts";
-import { MANAGED_CACHING_OPTIMIZED_POLICY_ID } from "../CloudFront/ManagedPolicies.ts";
+import {
+  MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+  MANAGED_CACHING_OPTIMIZED_POLICY_ID,
+} from "../CloudFront/ManagedPolicies.ts";
+import { OriginAccessControl } from "../CloudFront/OriginAccessControl.ts";
+import type { PolicyStatement } from "../IAM/Policy.ts";
 import { Record as Route53Record } from "../Route53/Record.ts";
 import { Bucket } from "../S3/Bucket.ts";
-import type { AssetFileOption } from "./AssetDeployment.ts";
 import { AssetDeployment } from "./AssetDeployment.ts";
 import {
   CF_BLOCK_CLOUDFRONT_URL_INJECTION,
   CF_ROUTER_INJECTION,
 } from "./cfcode.ts";
 import type {
-  StaticSiteAssetsProps,
   StaticSiteBuildProps,
+  WebsiteAssetsConfig,
   WebsiteDomainProps,
   WebsiteEdgeProps,
   WebsiteInvalidationProps,
@@ -44,6 +47,7 @@ export interface StaticSiteRouterAttachment {
     kvStoreArn: Input<string>;
     kvNamespace: Input<string>;
     distributionId: Input<string>;
+    distributionArn: Input<string>;
     url: Input<string>;
   };
   /**
@@ -76,9 +80,7 @@ export interface StaticSiteProps {
   /**
    * Static site asset upload configuration.
    */
-  assets?: StaticSiteAssetsProps & {
-    fileOptions?: AssetFileOption[];
-  };
+  assets?: WebsiteAssetsConfig;
   /**
    * Optional custom domain.
    */
@@ -98,8 +100,23 @@ export interface StaticSiteProps {
    */
   indexPage?: string;
   /**
+   * Serve this site as a single-page application: any request that does not
+   * match an uploaded file is answered with the `indexPage` and a `200`
+   * status so client-side routing can take over.
+   *
+   * This is also the fallback behavior when neither `spa` nor `errorPage`
+   * is set. Setting `spa: true` makes the intent explicit and guards
+   * against accidentally combining it with `errorPage`.
+   *
+   * Mutually exclusive with `errorPage` (a static site returns a real
+   * `404`; a SPA serves the app shell).
+   * @default false
+   */
+  spa?: boolean;
+  /**
    * Error page returned for 403/404 requests.
-   * When set, CloudFront customErrorResponses are created.
+   * When set, CloudFront customErrorResponses are created and misses return
+   * a real `404` status. Mutually exclusive with `spa`.
    */
   errorPage?: string;
   /**
@@ -153,6 +170,21 @@ export interface StaticSiteProps {
  * });
  * ```
  *
+ * @section Single-Page Applications
+ * @example SPA With Client-Side Routing
+ * ```typescript
+ * // Misses fall back to index.html with a 200 so the client router
+ * // can handle the path.
+ * const site = yield* StaticSite("App", {
+ *   path: "./app",
+ *   build: {
+ *     command: "bun run build",
+ *     output: "dist",
+ *   },
+ *   spa: true,
+ * });
+ * ```
+ *
  * @section Custom Domains
  * @example Site With A Route 53 Domain
  * ```typescript
@@ -179,185 +211,240 @@ export interface StaticSiteProps {
  * ```
  */
 export const StaticSite = (id: string, props: StaticSiteProps) =>
-  Effect.gen(function* () {
-    const domain = normalizeDomain(props.domain);
-    const sitePath = (props.path ?? ".") as string;
-    const indexPage = props.indexPage ?? "index.html";
-    const assetPrefix = normalizePrefix(props.assets?.path);
-    const assetRoutes = [...(props.assets?.routes ?? [])]
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .map(normalizeRoutePath);
-    const invalidationProps =
-      props.invalidation !== undefined
-        ? props.invalidation
-        : { paths: "all" as const, wait: false };
+  makeKvSite(id, props).pipe(Namespace.push(id));
 
-    if (props.router && props.domain) {
+/**
+ * Dynamic server origin for {@link makeKvSite} — the KV metadata gains a
+ * `servers` entry so requests that match no uploaded file are forwarded to
+ * the server instead of a static fallback.
+ * @internal
+ */
+export interface KvSiteServerOptions {
+  /**
+   * Hostname of the dynamic server origin (e.g. a Lambda Function URL
+   * host). Requests that miss the file manifest are forwarded here with
+   * `x-forwarded-host` set.
+   */
+  serverHost: Input<string>;
+  /**
+   * Optional dedicated image-optimization origin: requests whose path
+   * starts with `route` (e.g. `/_next/image`) are forwarded to `host`
+   * instead of the server origin (see `metadata.image` in cfcode.ts).
+   */
+  image?: {
+    route: string;
+    host: Input<string>;
+  };
+}
+
+/**
+ * Shared implementation behind `StaticSite` and the SSR framework
+ * composites (`AWS.Website.Nuxt`, ...): S3 + CloudFront + KV-manifest edge
+ * routing, optionally with a dynamic server origin for misses.
+ * @internal
+ */
+export const makeKvSite = Effect.fn("AWS.Website.KvSite")(function* (
+  id: string,
+  props: StaticSiteProps,
+  server?: KvSiteServerOptions,
+) {
+  const domain = normalizeDomain(props.domain);
+  const sitePath = (props.path ?? ".") as string;
+  const indexPage = props.indexPage ?? "index.html";
+  const assetPrefix = normalizePrefix(props.assets?.path);
+  const assetRoutes = [...(props.assets?.routes ?? [])]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map(normalizeRoutePath);
+  const invalidationProps =
+    props.invalidation !== undefined
+      ? props.invalidation
+      : { paths: "all" as const, wait: false };
+
+  if (props.router && props.domain) {
+    return yield* Effect.die(
+      `Cannot provide both "domain" and "router". Use the "domain" prop on the Router component.`,
+    );
+  }
+  if (props.router && props.edge) {
+    return yield* Effect.die(
+      `Cannot provide both "edge" and "router". Use the "edge" prop on the Router component.`,
+    );
+  }
+  if (props.spa && props.errorPage) {
+    return yield* Effect.die(
+      `Cannot provide both "spa" and "errorPage". A SPA answers misses with the index page (200); "errorPage" answers them with a real 404.`,
+    );
+  }
+  if (server && (props.spa || props.errorPage)) {
+    return yield* Effect.die(
+      `A site with a server origin routes misses to the server; "spa" and "errorPage" do not apply.`,
+    );
+  }
+
+  const build = props.build
+    ? yield* Command.Build("Build", {
+        command: props.build.command,
+        cwd: sitePath,
+        memo: {
+          include: props.build.include,
+          exclude: props.build.exclude,
+          lockfile: props.build.lockfile,
+        },
+        outdir: props.build.output,
+        env: props.environment,
+      })
+    : undefined;
+
+  const uploadSourcePath = (build?.outdir ?? sitePath) as string;
+
+  const providedBucket = props.assets?.bucket;
+  const bucket =
+    providedBucket ??
+    (yield* Bucket("Bucket", {
+      bucketName: props.bucketName,
+      forceDestroy: props.forceDestroy,
+      tags: props.tags,
+    }));
+
+  const routerAttachment = props.router;
+  const routerPathPrefix = routerAttachment?.path
+    ? "/" + routerAttachment.path.replace(/^\//, "").replace(/\/$/, "")
+    : undefined;
+
+  const files = yield* AssetDeployment("Files", {
+    bucket: bucket,
+    sourcePath: uploadSourcePath,
+    prefix: normalizeUploadPrefix(assetPrefix, routerPathPrefix),
+    purge: props.assets?.purge ?? true,
+    fileOptions: props.assets?.fileOptions,
+    textEncoding: props.assets?.textEncoding,
+  });
+
+  const stack = yield* Stack;
+  const stage = yield* Stage;
+  const ns = yield* Namespace.CurrentNamespace;
+  const fqn = ns ? toPath(ns).join("/") : id;
+  const kvNamespace = createHash("md5")
+    .update(`${stack.name}-${stage}-${fqn}`)
+    .digest("hex")
+    .substring(0, 4);
+
+  // Standalone distributions carry the asset prefix as the default
+  // origin's `originPath` (so error-page fetches that bypass the edge
+  // function still resolve); router-attached sites prefix at the edge via
+  // the KV metadata instead.
+  const s3MetadataDir =
+    routerAttachment && assetPrefix ? "/" + assetPrefix : "";
+
+  const kvEntries = buildKvEntries({
+    files,
+    bucketDomain: bucket.bucketRegionalDomainName as Input<string>,
+    s3Dir: s3MetadataDir,
+    assetRoutes,
+    indexPage,
+    errorPage: props.errorPage,
+    routerPathPrefix,
+    serverHost: server?.serverHost,
+    imageRoute: server?.image?.route,
+    imageHost: server?.image?.host,
+  });
+
+  let distributionId: Input<string>;
+  let kvStoreArn: Input<string>;
+  let distribution: Distribution | undefined;
+  let prodUrl: Input<string> | undefined;
+
+  if (routerAttachment) {
+    kvStoreArn = routerAttachment.instance.kvStoreArn;
+    distributionId = routerAttachment.instance.distributionId;
+    const hostPattern = routerAttachment.domain
+      ? routerAttachment.domain
+          .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+          .replace(/\*/g, ".*")
+      : undefined;
+    yield* KvRoutesUpdate("RoutesUpdate", {
+      store: kvStoreArn,
+      namespace: routerAttachment.instance.kvNamespace as any,
+      key: "routes",
+      entry: [
+        "site",
+        kvNamespace,
+        hostPattern ?? "",
+        routerPathPrefix ?? "/",
+      ].join(","),
+    });
+    prodUrl = routerAttachment.domain
+      ? `https://${routerAttachment.domain}${routerPathPrefix ?? ""}`
+      : Output.interpolate`${routerAttachment.instance.url}${routerPathPrefix ?? ""}`;
+  } else {
+    if (
+      domain &&
+      !domain.cert &&
+      !domain.hostedZoneId &&
+      domain.dns === false
+    ) {
       return yield* Effect.die(
-        `Cannot provide both "domain" and "router". Use the "domain" prop on the Router component.`,
+        "StaticSite domain configuration with `dns: false` requires `cert`.",
       );
     }
-    if (props.router && props.edge) {
-      return yield* Effect.die(
-        `Cannot provide both "edge" and "router". Use the "edge" prop on the Router component.`,
-      );
-    }
 
-    const build = props.build
-      ? yield* Command.Build("Build", {
-          command: props.build.command,
-          cwd: sitePath,
-          memo: {
-            include: props.build.include,
-            exclude: props.build.exclude,
-            lockfile: props.build.lockfile,
-          },
-          outdir: props.build.output,
-          env: props.environment,
+    const certificate =
+      !domain || domain.cert
+        ? domain?.cert
+          ? { certificateArn: domain.cert }
+          : undefined
+        : yield* Certificate("Certificate", {
+            domainName: domain.name,
+            subjectAlternativeNames: [
+              ...(domain.aliases ?? []),
+              ...(domain.redirects ?? []),
+            ],
+            hostedZoneId: domain.hostedZoneId,
+            tags: props.tags,
+          });
+
+    const kvStore = yield* KeyValueStore("KvStore", {});
+    kvStoreArn = kvStore.keyValueStoreArn;
+
+    const viewerRequest = yield* CloudFrontFunction("ViewerRequest", {
+      comment: `${id} viewer request`,
+      code: buildRequestFunctionCode({
+        kvNamespace,
+        userInjection: props.edge?.viewerRequest?.injection,
+        blockCloudfrontUrl: !!domain,
+      }),
+      keyValueStoreArns: [kvStore.keyValueStoreArn],
+    });
+
+    const viewerResponse = props.edge?.viewerResponse
+      ? yield* CloudFrontFunction("ViewerResponse", {
+          comment: `${id} viewer response`,
+          code: buildResponseFunctionCode(props.edge.viewerResponse.injection),
+          keyValueStoreArns: props.edge.viewerResponse.keyValueStoreArn
+            ? [props.edge.viewerResponse.keyValueStoreArn]
+            : undefined,
         })
       : undefined;
 
-    const uploadSourcePath = (build?.outdir ?? sitePath) as string;
+    const functionAssociations = [
+      {
+        eventType: "viewer-request" as const,
+        functionArn: viewerRequest.functionArn,
+      },
+      ...(viewerResponse
+        ? [
+            {
+              eventType: "viewer-response" as const,
+              functionArn: viewerResponse.functionArn,
+            },
+          ]
+        : []),
+    ];
 
-    const providedBucket = props.assets?.bucket;
-    const bucket =
-      providedBucket ??
-      (yield* Bucket("Bucket", {
-        bucketName: props.bucketName,
-        forceDestroy: props.forceDestroy,
-        tags: props.tags,
-      }));
-
-    const routerAttachment = props.router;
-    const routerPathPrefix = routerAttachment?.path
-      ? "/" + routerAttachment.path.replace(/^\//, "").replace(/\/$/, "")
-      : undefined;
-
-    const files = yield* AssetDeployment("Files", {
-      bucket: bucket,
-      sourcePath: uploadSourcePath,
-      prefix: normalizeUploadPrefix(assetPrefix, routerPathPrefix),
-      purge: props.assets?.purge ?? true,
-      fileOptions: props.assets?.fileOptions,
-      textEncoding: props.assets?.textEncoding,
-    });
-
-    const stack = yield* Stack;
-    const stage = yield* Stage;
-    const ns = yield* Namespace.CurrentNamespace;
-    const fqn = ns ? toPath(ns).join("/") : id;
-    const kvNamespace = createHash("md5")
-      .update(`${stack.name}-${stage}-${fqn}`)
-      .digest("hex")
-      .substring(0, 4);
-
-    const kvEntries = buildKvEntries(
-      uploadSourcePath,
-      bucket,
-      assetPrefix,
-      assetRoutes,
-      indexPage,
-      props.errorPage,
-      routerPathPrefix,
-    );
-
-    let distributionId: Input<string>;
-    let kvStoreArn: Input<string>;
-    let distribution: Distribution | undefined;
-    let prodUrl: Input<string> | undefined;
-
-    if (routerAttachment) {
-      kvStoreArn = routerAttachment.instance.kvStoreArn;
-      distributionId = routerAttachment.instance.distributionId;
-      const hostPattern = routerAttachment.domain
-        ? routerAttachment.domain
-            .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-            .replace(/\*/g, ".*")
-        : undefined;
-      yield* KvRoutesUpdate("RoutesUpdate", {
-        store: kvStoreArn,
-        namespace: routerAttachment.instance.kvNamespace as any,
-        key: "routes",
-        entry: [
-          "site",
-          kvNamespace,
-          hostPattern ?? "",
-          routerPathPrefix ?? "/",
-        ].join(","),
-      });
-      prodUrl = routerAttachment.domain
-        ? `https://${routerAttachment.domain}${routerPathPrefix ?? ""}`
-        : Output.interpolate`${routerAttachment.instance.url}${routerPathPrefix ?? ""}`;
-    } else {
-      if (
-        domain &&
-        !domain.cert &&
-        !domain.hostedZoneId &&
-        domain.dns === false
-      ) {
-        return yield* Effect.die(
-          "StaticSite domain configuration with `dns: false` requires `cert`.",
-        );
-      }
-
-      const certificate =
-        !domain || domain.cert
-          ? domain?.cert
-            ? { certificateArn: domain.cert }
-            : undefined
-          : yield* Certificate("Certificate", {
-              domainName: domain.name,
-              subjectAlternativeNames: [
-                ...(domain.aliases ?? []),
-                ...(domain.redirects ?? []),
-              ],
-              hostedZoneId: domain.hostedZoneId,
-              tags: props.tags,
-            });
-
-      const kvStore = yield* KeyValueStore("KvStore", {});
-      kvStoreArn = kvStore.keyValueStoreArn;
-
-      const viewerRequest = yield* CloudFrontFunction("ViewerRequest", {
-        comment: `${id} viewer request`,
-        code: buildRequestFunctionCode({
-          kvNamespace,
-          userInjection: props.edge?.viewerRequest?.injection,
-          blockCloudfrontUrl: !!domain,
-        }),
-        keyValueStoreArns: [kvStore.keyValueStoreArn],
-      });
-
-      const viewerResponse = props.edge?.viewerResponse
-        ? yield* CloudFrontFunction("ViewerResponse", {
-            comment: `${id} viewer response`,
-            code: buildResponseFunctionCode(
-              props.edge.viewerResponse.injection,
-            ),
-            keyValueStoreArns: props.edge.viewerResponse.keyValueStoreArn
-              ? [props.edge.viewerResponse.keyValueStoreArn]
-              : undefined,
-          })
-        : undefined;
-
-      const functionAssociations = [
-        {
-          eventType: "viewer-request" as const,
-          functionArn: viewerRequest.functionArn,
-        },
-        ...(viewerResponse
-          ? [
-              {
-                eventType: "viewer-response" as const,
-                functionArn: viewerResponse.functionArn,
-              },
-            ]
-          : []),
-      ];
-
-      const errorPage = "/" + (props.errorPage ?? indexPage).replace(/^\//, "");
-      const customErrorResponses = props.errorPage
+    const errorPage = "/" + (props.errorPage ?? indexPage).replace(/^\//, "");
+    const customErrorResponses =
+      props.errorPage && !server
         ? [
             {
               ErrorCode: 403,
@@ -374,207 +461,265 @@ export const StaticSite = (id: string, props: StaticSiteProps) =>
           ]
         : undefined;
 
-      distribution = yield* Distribution("Distribution", {
-        aliases: domain
-          ? [
-              domain.name,
-              ...(domain.aliases ?? []),
-              ...(domain.redirects ?? []),
-            ]
-          : undefined,
-        origins: [
-          {
-            id: "default",
-            domainName: "placeholder.alchemy.run",
-            customOriginConfig: {
-              httpPort: 80,
-              httpsPort: 443,
-              originProtocolPolicy: "https-only",
-              originReadTimeout: "20 seconds",
-              originSslProtocols: ["TLSv1.2"],
-            },
+    // Server-backed sites share one behavior between S3 assets and the
+    // dynamic origin, so the cache policy must not cache responses that
+    // carry no Cache-Control (SSR pages) while still honoring the
+    // immutable Cache-Control the asset uploader sets. Managed
+    // CachingOptimized would cache header-less SSR responses for a day.
+    const serverCachePolicy = server
+      ? yield* CachePolicy("ServerCachePolicy", {
+          comment: `${id} server cache policy`,
+          minTTL: 0,
+          defaultTTL: 0,
+          maxTTL: "365 days",
+          parametersInCacheKeyAndForwardedToOrigin: {
+            EnableAcceptEncodingGzip: true,
+            EnableAcceptEncodingBrotli: true,
+            QueryStringsConfig: { QueryStringBehavior: "all" },
+            HeadersConfig: { HeaderBehavior: "none" },
+            CookiesConfig: { CookieBehavior: "none" },
           },
-        ],
-        defaultCacheBehavior: {
-          targetOriginId: "default",
-          viewerProtocolPolicy: "redirect-to-https",
-          allowedMethods: [
-            "DELETE",
-            "GET",
-            "HEAD",
-            "OPTIONS",
-            "PATCH",
-            "POST",
-            "PUT",
-          ],
-          cachedMethods: ["GET", "HEAD"],
-          compress: true,
-          cachePolicyId: MANAGED_CACHING_OPTIMIZED_POLICY_ID,
-          functionAssociations,
-        },
-        customErrorResponses,
-        viewerCertificate: certificate
+        })
+      : undefined;
+
+    // The default origin is real (not a placeholder): static sites point
+    // at the bucket through an OAC so requests that bypass the edge
+    // function's origin switch — CloudFront's custom-error-page fetches
+    // in particular — still resolve; server-backed sites point at the
+    // server so misses stream from it even if the function is bypassed.
+    const oac = server
+      ? undefined
+      : yield* OriginAccessControl("OriginAccessControl", {
+          originType: "s3",
+          description: `${id} origin access control`,
+        });
+
+    distribution = yield* Distribution("Distribution", {
+      aliases: domain
+        ? [domain.name, ...(domain.aliases ?? []), ...(domain.redirects ?? [])]
+        : undefined,
+      origins: [
+        server
           ? {
-              acmCertificateArn: certificate.certificateArn,
-              sslSupportMethod: "sni-only",
-              minimumProtocolVersion: "TLSv1.2_2021",
-            }
-          : undefined,
-        tags: props.tags,
-      });
-
-      const dist = distribution;
-      distributionId = dist.distributionId;
-
-      if (domain?.hostedZoneId && domain.dns !== false) {
-        yield* Effect.forEach(
-          [domain.name, ...(domain.aliases ?? []), ...(domain.redirects ?? [])],
-          (name, index) =>
-            Route53Record(`AliasRecord${index + 1}`, {
-              hostedZoneId: domain.hostedZoneId!,
-              name,
-              type: "A",
-              aliasTarget: {
-                hostedZoneId: dist.hostedZoneId,
-                dnsName: dist.domainName,
+              id: "default",
+              domainName: server.serverHost,
+              customOriginConfig: {
+                httpPort: 80,
+                httpsPort: 443,
+                originProtocolPolicy: "https-only" as const,
+                originReadTimeout: "20 seconds",
+                originSslProtocols: ["TLSv1.2"],
               },
-            }),
-          { concurrency: "unbounded" },
-        );
-      }
-
-      prodUrl = domain
-        ? Output.interpolate`https://${domain.name}`
-        : Output.interpolate`https://${dist.domainName}`;
-    }
-
-    yield* KvEntries("KvEntries", {
-      store: kvStoreArn,
-      namespace: kvNamespace,
-      entries: kvEntries,
-      purge: props.assets?.purge ?? true,
+            }
+          : {
+              id: "default",
+              domainName: bucket.bucketRegionalDomainName,
+              s3Origin: true,
+              originAccessControlId: oac!.originAccessControlId,
+              originPath: assetPrefix ? "/" + assetPrefix : undefined,
+            },
+      ],
+      defaultCacheBehavior: {
+        targetOriginId: "default",
+        viewerProtocolPolicy: "redirect-to-https",
+        allowedMethods: [
+          "DELETE",
+          "GET",
+          "HEAD",
+          "OPTIONS",
+          "PATCH",
+          "POST",
+          "PUT",
+        ],
+        cachedMethods: ["GET", "HEAD"],
+        compress: true,
+        cachePolicyId: serverCachePolicy
+          ? serverCachePolicy.cachePolicyId
+          : MANAGED_CACHING_OPTIMIZED_POLICY_ID,
+        originRequestPolicyId: server
+          ? MANAGED_ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID
+          : undefined,
+        functionAssociations,
+      },
+      customErrorResponses,
+      viewerCertificate: certificate
+        ? {
+            acmCertificateArn: certificate.certificateArn,
+            sslSupportMethod: "sni-only",
+            minimumProtocolVersion: "TLSv1.2_2021",
+          }
+        : undefined,
+      tags: props.tags,
     });
 
-    const invalidation =
-      invalidationProps === false
-        ? undefined
-        : yield* Invalidation("Invalidation", {
-            distributionId: distributionId,
-            version: files.version,
-            wait: invalidationProps?.wait,
-            paths:
-              invalidationProps?.paths === "all" || !invalidationProps?.paths
-                ? ["/*"]
-                : invalidationProps.paths === "versioned"
-                  ? [`/${indexPage.replace(/^\/+/, "")}`]
-                  : invalidationProps.paths,
-          });
+    const dist = distribution;
+    distributionId = dist.distributionId;
 
-    return {
-      bucket: bucket,
-      build,
-      files,
-      distribution,
-      invalidation,
-      kvNamespace,
-      url: prodUrl,
-    };
-  }).pipe(Namespace.push(id));
-
-const buildKvEntries = (
-  outputPath: string,
-  bucket: {
-    bucketRegionalDomainName: Input<string>;
-  },
-  assetPrefix: string,
-  assetRoutes: string[],
-  indexPage: string,
-  errorPage: string | undefined,
-  routerPathPrefix: string | undefined,
-): Record<string, Input<string>> => {
-  const entries: Record<string, Input<string>> = {};
-  const dirs: string[] = [];
-  const expandDirs = [".well-known"];
-
-  const processDir = (childPath = "", level = 0) => {
-    let currentPath: string;
-    try {
-      currentPath = path.join(outputPath, childPath);
-    } catch {
-      return;
+    if (domain?.hostedZoneId && domain.dns !== false) {
+      yield* Effect.forEach(
+        [domain.name, ...(domain.aliases ?? []), ...(domain.redirects ?? [])],
+        (name, index) =>
+          Route53Record(`AliasRecord${index + 1}`, {
+            hostedZoneId: domain.hostedZoneId!,
+            name,
+            type: "A",
+            aliasTarget: {
+              hostedZoneId: dist.hostedZoneId,
+              dnsName: dist.domainName,
+            },
+          }),
+        { concurrency: "unbounded" },
+      );
     }
-    let items: { name: string; isFile(): boolean; isDirectory(): boolean }[];
-    try {
-      items = readdirSync(currentPath, { withFileTypes: true }) as any;
-    } catch {
-      return;
-    }
-    for (const item of items) {
-      const name = String(item.name);
-      if (item.isFile()) {
-        const filePath = path.posix.join("/", childPath, name);
-        entries[filePath] = "s3";
-      } else if (item.isDirectory()) {
-        if (level === 0 && expandDirs.includes(name)) {
-          processDir(path.join(childPath, name), level + 1);
-        } else {
-          dirs.push(path.posix.join("/", childPath, name));
-        }
-      }
-    }
-  };
-  processDir();
 
-  const errorPagePath = "/" + (errorPage ?? indexPage).replace(/^\//, "");
-  const bucketDomain = bucket.bucketRegionalDomainName;
-  const metadata: Omit<KvSiteMetadata, "s3"> & {
-    s3: Omit<KvSiteMetadata["s3"], "domain">;
-  } = {
-    base:
-      routerPathPrefix && routerPathPrefix !== "/"
-        ? routerPathPrefix
-        : undefined,
-    custom404: errorPage ? undefined : errorPagePath,
-    errorResponseCode: errorPage ? 404 : undefined,
-    s3: {
-      dir: assetPrefix ? "/" + assetPrefix : "",
-      routes: [...assetRoutes, ...dirs],
+    prodUrl = domain
+      ? Output.interpolate`https://${domain.name}`
+      : Output.interpolate`https://${dist.domainName}`;
+  }
+
+  // The edge router signs S3 origin requests with OAC (sigv4, see
+  // `setS3Origin` in cfcode.ts), so the bucket must allow the serving
+  // distribution — without this policy every request 403s.
+  const servingDistributionArn = routerAttachment
+    ? routerAttachment.instance.distributionArn
+    : distribution!.distributionArn;
+  const bucketPolicy: PolicyStatement = {
+    Effect: "Allow",
+    Principal: {
+      Service: "cloudfront.amazonaws.com",
+    },
+    Action: ["s3:GetObject"],
+    Resource: [Output.interpolate`${bucket.bucketArn}/*` as any],
+    Condition: {
+      StringEquals: {
+        "AWS:SourceArn": servingDistributionArn as any,
+      },
     },
   };
+  yield* bucket.bind`AWS.S3.Policy(CloudFront, ${bucket})`({
+    policyStatements: [bucketPolicy],
+  });
 
-  entries["metadata"] = stringifyResolvedString(bucketDomain, (domain) =>
-    JSON.stringify({
-      ...metadata,
-      s3: {
-        ...metadata.s3,
-        domain,
-      },
-    }),
+  yield* KvEntries("KvEntries", {
+    store: kvStoreArn,
+    namespace: kvNamespace,
+    entries: kvEntries,
+    purge: props.assets?.purge ?? true,
+  });
+
+  const invalidation =
+    invalidationProps === false
+      ? undefined
+      : yield* Invalidation("Invalidation", {
+          distributionId: distributionId,
+          version: files.version,
+          wait: invalidationProps?.wait,
+          paths:
+            invalidationProps?.paths === "all" || !invalidationProps?.paths
+              ? ["/*"]
+              : invalidationProps.paths === "versioned"
+                ? [`/${indexPage.replace(/^\/+/, "")}`]
+                : invalidationProps.paths,
+        });
+
+  return {
+    bucket: bucket,
+    build,
+    files,
+    distribution,
+    invalidation,
+    kvNamespace,
+    url: prodUrl,
+  };
+});
+
+/**
+ * Derive the CloudFront KV routing entries from the *uploaded* file list
+ * (the `AssetDeployment`'s `files` attribute) so the manifest always
+ * reflects exactly what landed in S3 — including build outputs that do not
+ * exist at plan time.
+ */
+const buildKvEntries = (args: {
+  files: { files: Output.Output<string[]> };
+  bucketDomain: Input<string>;
+  s3Dir: string;
+  assetRoutes: string[];
+  indexPage: string;
+  errorPage: string | undefined;
+  routerPathPrefix: string | undefined;
+  serverHost: Input<string> | undefined;
+  imageRoute: string | undefined;
+  imageHost: Input<string> | undefined;
+}): Input<Record<string, string>> =>
+  Output.map(
+    ([fileList, bucketDomain, serverHost, imageHost]: [
+      string[] | undefined,
+      string,
+      string | undefined,
+      string | undefined,
+    ]) => {
+      const entries: Record<string, string> = {};
+      for (const file of fileList ?? []) {
+        entries[`/${file}`] = "s3";
+      }
+      const errorPagePath =
+        "/" + (args.errorPage ?? args.indexPage).replace(/^\//, "");
+      const metadata: KvSiteMetadata = {
+        base:
+          args.routerPathPrefix && args.routerPathPrefix !== "/"
+            ? args.routerPathPrefix
+            : undefined,
+        custom404:
+          serverHost !== undefined || args.errorPage
+            ? undefined
+            : errorPagePath,
+        errorResponseCode:
+          serverHost === undefined && args.errorPage ? 404 : undefined,
+        s3: {
+          domain: bucketDomain,
+          dir: args.s3Dir,
+          routes: args.assetRoutes,
+        },
+        servers: serverHost !== undefined ? [[serverHost]] : undefined,
+        image:
+          args.imageRoute !== undefined && imageHost !== undefined
+            ? { route: args.imageRoute, host: imageHost }
+            : undefined,
+      };
+      entries["metadata"] = JSON.stringify(metadata);
+      return entries;
+    },
+  )(
+    Output.all(
+      args.files.files,
+      Output.asOutput(args.bucketDomain as any),
+      Output.asOutput(args.serverHost as any),
+      Output.asOutput(args.imageHost as any),
+    ) as Output.Output<
+      [string[] | undefined, string, string | undefined, string | undefined]
+    >,
   );
 
-  return entries;
-};
-
 interface KvSiteMetadata {
-  base?: string;
-  custom404?: string;
-  errorResponseCode?: number;
+  base?: string | undefined;
+  custom404?: string | undefined;
+  errorResponseCode?: number | undefined;
   s3: {
     domain: string;
     dir: string;
     routes: string[];
   };
+  /**
+   * Server origin hosts (`[[host, lat?, lon?], ...]`) the edge router
+   * forwards misses to — see `findNearestServer` in cfcode.ts.
+   */
+  servers?: Array<Array<string>> | undefined;
+  /**
+   * Dedicated image-optimization origin: requests whose path starts with
+   * `route` are forwarded to `host` — see `metadata.image` in cfcode.ts.
+   */
+  image?: { route: string; host: string } | undefined;
 }
-
-const stringifyResolvedString = (
-  value: Input<string>,
-  build: (resolved: string) => string,
-): Input<string> =>
-  typeof value === "string"
-    ? build(value)
-    : Effect.isEffect(value)
-      ? value.pipe(Effect.map((resolved) => build(resolved)))
-      : value.pipe(Output.map((resolved) => build(resolved)));
 
 const buildRequestFunctionCode = ({
   kvNamespace,
