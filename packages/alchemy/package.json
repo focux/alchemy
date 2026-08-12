@@ -364,12 +364,13 @@
     "access": "public"
   },
   "dependencies": {
+    "@alchemy.run/cloudflare-runtime": "workspace:*",
+    "@alchemy.run/floci": "workspace:*",
     "@alchemy.run/node-utils": "catalog:",
     "@aws-sdk/credential-providers": "catalog:",
     "@clack/prompts": "^1.7.0",
     "@distilled.cloud/aws": "workspace:*",
     "@distilled.cloud/axiom": "workspace:*",
-    "@alchemy.run/cloudflare-runtime": "workspace:*",
     "@distilled.cloud/cloudflare": "workspace:*",
     "@distilled.cloud/core": "workspace:*",
     "@distilled.cloud/neon": "workspace:*",
@@ -404,7 +405,7 @@
     "@cloudflare/containers": "catalog:",
     "@cloudflare/puppeteer": "^1.1.0",
     "@cloudflare/workers-types": "catalog:",
-    "@alchemy.run/web-frameworks": "workspace:*",
+    "@alchemy.run/frontend-frameworks": "workspace:*",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",

@@ -3,11 +3,11 @@ import { makeFrameworkSite, type FrameworkSiteProps } from "./FrameworkSite.ts";
 
 /** The framework-integration package that drives the SvelteKit build. */
 export const SVELTEKIT_FRAMEWORK_SPECIFIER =
-  "@alchemy.run/web-frameworks/sveltekit";
+  "@alchemy.run/frontend-frameworks/sveltekit";
 
 /** The AWS Lambda deploy target for the SvelteKit build. */
 export const SVELTEKIT_AWS_TARGET_SPECIFIER =
-  "@alchemy.run/web-frameworks/sveltekit/aws";
+  "@alchemy.run/frontend-frameworks/sveltekit/aws";
 
 export interface SvelteKitProps extends FrameworkSiteProps {
   /**
@@ -26,8 +26,8 @@ export interface SvelteKitProps extends FrameworkSiteProps {
  * and a CloudFront distribution whose edge router serves uploaded files
  * from S3 and forwards everything else to the server.
  *
- * The build runs through `@alchemy.run/web-frameworks/sveltekit` with the
- * `@alchemy.run/web-frameworks/sveltekit/aws` deploy target (an in-memory
+ * The build runs through `@alchemy.run/frontend-frameworks/sveltekit` with the
+ * `@alchemy.run/frontend-frameworks/sveltekit/aws` deploy target (an in-memory
  * kit adapter emitting a streaming Lambda handler) — both must be
  * installed in your project.
  *

@@ -21,6 +21,8 @@ import { CredentialsStoreLive } from "../Auth/Credentials.ts";
 import * as Command from "../Command/index.ts";
 import { DockerLive } from "../Docker/Docker.ts";
 import { KeyPair, KeyPairProvider } from "../KeyPair.ts";
+import * as ProviderLayer from "../Local/ProviderLayer.ts";
+import { flociDual } from "./Local/FlociServices.ts";
 import * as Provider from "../Provider.ts";
 import { Random, RandomProvider } from "../Random.ts";
 import * as AccessAnalyzer from "./AccessAnalyzer/index.ts";
@@ -1135,7 +1137,7 @@ export const providers = () =>
           DevOpsGuru.NotificationChannelProvider(),
           DevOpsGuru.ResourceCollectionProvider(),
           DevOpsGuru.ServiceIntegrationProvider(),
-          DynamoDB.TableProvider(),
+          flociDual(DynamoDB.Table, () => DynamoDB.TableProvider()),
           EC2.DhcpOptionsProvider(),
           EC2.EgressOnlyInternetGatewayProvider(),
           EC2.EIPProvider(),
@@ -1190,9 +1192,9 @@ export const providers = () =>
           EventBridge.ApiDestinationProvider(),
           EventBridge.ArchiveProvider(),
           EventBridge.ConnectionProvider(),
-          EventBridge.EventBusProvider(),
+          flociDual(EventBridge.EventBus, () => EventBridge.EventBusProvider()),
           EventBridge.PermissionProvider(),
-          EventBridge.RuleProvider(),
+          flociDual(EventBridge.Rule, () => EventBridge.RuleProvider()),
           FIS.ExperimentTemplateProvider(),
           FIS.TargetAccountConfigurationProvider(),
           Firehose.DeliveryStreamProvider(),
@@ -1216,7 +1218,7 @@ export const providers = () =>
           IAM.LoginProfileProvider(),
           IAM.OpenIDConnectProviderProvider(),
           IAM.PolicyProvider(),
-          IAM.RoleProvider(),
+          flociDual(IAM.Role, () => IAM.RoleProvider()),
           IAM.SAMLProviderProvider(),
           IAM.ServerCertificateProvider(),
           IAM.ServiceLinkedRoleProvider(),
@@ -1255,8 +1257,18 @@ export const providers = () =>
           LakeFormation.PermissionsProvider(),
           LakeFormation.ResourceProvider(),
           Lambda.AliasProvider(),
-          Lambda.EventSourceMappingProvider(),
-          Lambda.FunctionProvider(),
+          // Requires the alchemy floci fork ≥ 1.6.0-alchemy.2: the
+          // reconciler's ownership scan calls lambda ListTags on
+          // `event-source-mapping:` ARNs, which stock floci 1.6.0 rejects.
+          flociDual(Lambda.EventSourceMapping, () =>
+            Lambda.EventSourceMappingProvider(),
+          ),
+          // Dual: live Lambda in deploy, floci-emulated (RPC-sidecar-hosted,
+          // hot-reloading) Lambda in dev — see FlociFunctionProvider.
+          ProviderLayer.dual(Lambda.Function, {
+            live: () => Lambda.FunctionProvider(),
+            local: () => Lambda.FlociFunctionProvider(),
+          }),
           Lambda.LayerVersionProvider(),
           Lambda.VersionProvider(),
           Lambda.MicrovmImageProvider(),
@@ -1359,11 +1371,13 @@ export const providers = () =>
           Route53.RecordProvider(),
           Route53.VpcAssociationAuthorizationProvider(),
           Route53.ZoneVpcAssociationProvider(),
-          S3.BucketProvider(),
+          flociDual(S3.Bucket, () => S3.BucketProvider()),
           Scheduler.ScheduleGroupProvider(),
           Scheduler.ScheduleProvider(),
           SecretsManager.RotationScheduleProvider(),
-          SecretsManager.SecretProvider(),
+          flociDual(SecretsManager.Secret, () =>
+            SecretsManager.SecretProvider(),
+          ),
           SES.AccountSettingsProvider(),
           SES.ActiveReceiptRuleSetProvider(),
           SES.ConfigurationSetEventDestinationProvider(),
@@ -1383,10 +1397,10 @@ export const providers = () =>
           SES.TenantResourceAssociationProvider(),
           SNS.PlatformApplicationProvider(),
           SNS.SubscriptionProvider(),
-          SNS.TopicProvider(),
+          flociDual(SNS.Topic, () => SNS.TopicProvider()),
           SocialMessaging.LinkedWhatsAppBusinessAccountProvider(),
-          SQS.QueueProvider(),
-          SSM.ParameterProvider(),
+          flociDual(SQS.Queue, () => SQS.QueueProvider()),
+          flociDual(SSM.Parameter, () => SSM.ParameterProvider()),
           StepFunctions.ActivityProvider(),
           StepFunctions.StateMachineProvider(),
           WAFv2.IPSetProvider(),

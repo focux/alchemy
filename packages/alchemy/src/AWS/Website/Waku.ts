@@ -2,10 +2,11 @@ import * as Namespace from "../../Namespace.ts";
 import { makeFrameworkSite, type FrameworkSiteProps } from "./FrameworkSite.ts";
 
 /** The framework-integration package that drives the Waku build. */
-export const WAKU_FRAMEWORK_SPECIFIER = "@alchemy.run/web-frameworks/waku";
+export const WAKU_FRAMEWORK_SPECIFIER = "@alchemy.run/frontend-frameworks/waku";
 
 /** The AWS Lambda deploy target for the Waku build. */
-export const WAKU_AWS_TARGET_SPECIFIER = "@alchemy.run/web-frameworks/waku/aws";
+export const WAKU_AWS_TARGET_SPECIFIER =
+  "@alchemy.run/frontend-frameworks/waku/aws";
 
 export interface WakuProps extends FrameworkSiteProps {
   /**
@@ -22,8 +23,8 @@ export interface WakuProps extends FrameworkSiteProps {
  * and a CloudFront distribution whose edge router serves uploaded files
  * from S3 and forwards everything else to the server.
  *
- * The build runs through `@alchemy.run/web-frameworks/waku` with the
- * `@alchemy.run/web-frameworks/waku/aws` deploy target (this package's fork
+ * The build runs through `@alchemy.run/frontend-frameworks/waku` with the
+ * `@alchemy.run/frontend-frameworks/waku/aws` deploy target (this package's fork
  * of waku's aws-lambda adapter, streaming enabled) — both must be installed
  * in your project.
  *
