@@ -306,13 +306,17 @@ export const make: (
       vite.version,
       devOptions?.port ?? options?.dev?.port,
     );
+    const host = devOptions?.host;
 
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
           const server = await vite.createServer({
             root,
-            server: { port },
+            server: {
+              port,
+              ...(host !== undefined ? { host } : undefined),
+            },
           });
           await server.listen();
           return server;

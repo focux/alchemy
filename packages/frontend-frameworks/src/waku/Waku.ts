@@ -1,8 +1,11 @@
 import * as FrameworkCore from "../core/index.ts";
 import type {
+  BuildOutput,
   DeployTarget,
+  DeployTargetBuildContext,
   DeployTargetError,
   DeployTargetInput,
+  DeployTargetServices,
 } from "../core/index.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -127,6 +130,27 @@ export interface WakuTarget<Config = unknown> extends DeployTarget<Config> {
   readonly vitePlugins: (
     context: WakuTargetContext,
   ) => Effect.Effect<ReadonlyArray<ViteModule.PluginOption>, DeployTargetError>;
+  /**
+   * Optional *wholesale* build takeover (see `DeployTarget.build`), with
+   * the waku-specific {@link WakuTargetBuildContext}.
+   */
+  readonly build?:
+    | ((
+        context: WakuTargetBuildContext,
+      ) => Effect.Effect<BuildOutput, DeployTargetError, DeployTargetServices>)
+    | undefined;
+}
+
+/**
+ * The context a waku target's wholesale `build` takeover receives: the
+ * generic build context plus the inline waku options the framework was
+ * constructed with ({@link WakuFrameworkOptions.waku}) — carried so
+ * wholesale targets that re-run the framework in a child process (the AWS
+ * target) can reconstruct it. Only JSON-serializable fields survive that
+ * process boundary.
+ */
+export interface WakuTargetBuildContext extends DeployTargetBuildContext {
+  readonly waku?: WakuConfig | undefined;
 }
 
 /**
@@ -730,8 +754,10 @@ export const make = (
         const target = yield* resolveTarget(root);
         if (target.build !== undefined) {
           // Wholesale build takeover: the target owns the entire pipeline.
+          // The inline waku options ride along so a child-process build can
+          // reconstruct the framework with the same options.
           return yield* target
-            .build({ root, framework: "waku" })
+            .build({ root, framework: "waku", waku: options?.waku })
             .pipe(
               Effect.provideService(FileSystem.FileSystem, fs),
               Effect.provideService(Path.Path, path),
@@ -842,6 +868,7 @@ export const make = (
           project.vite.version,
           explicitPort,
         );
+        const host = devOptions?.host;
         // The dev server *starts* under the project root cwd (waku
         // resolves its html shell and relative inputs from the cwd at
         // startup); the cwd is restored once the server is listening.
@@ -856,7 +883,11 @@ export const make = (
                   plugins: [
                     project.vitePlugins.unstable_combinedPlugins(wakuConfig),
                   ],
-                  server: { port, strictPort: !!explicitPort },
+                  server: {
+                    port,
+                    strictPort: !!explicitPort,
+                    ...(host !== undefined ? { host } : undefined),
+                  },
                 });
                 return await server.listen();
               },

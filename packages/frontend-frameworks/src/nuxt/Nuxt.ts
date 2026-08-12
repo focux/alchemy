@@ -55,7 +55,10 @@ export interface NuxtInstance {
    */
   readonly server?:
     | {
-        readonly listen: (port: number) => Promise<NuxtDevListener>;
+        readonly listen: (
+          port: number,
+          opts?: { readonly hostname?: string },
+        ) => Promise<NuxtDevListener>;
       }
     | undefined;
 }
@@ -115,6 +118,14 @@ export interface NuxtTargetConfig {
    * @default true (applied by the Cloudflare target)
    */
   readonly nodeCompat?: boolean | undefined;
+  /**
+   * The nuxt config overrides the framework half was constructed with
+   * ({@link NuxtOptions.nuxt}). Carried on the target config so wholesale
+   * targets that re-run the framework in a child process (the AWS target —
+   * `loadNuxt` executes user config/modules that may mutate the process)
+   * can reconstruct the framework with the same options.
+   */
+  readonly nuxt?: Record<string, unknown> | undefined;
 }
 
 /** Inputs the framework passes when asking the target for its dev platform. */
@@ -317,6 +328,7 @@ export const make: (
     compatibilityDate: options?.compatibilityDate,
     compatibilityFlags: options?.compatibilityFlags,
     main: options?.main,
+    nuxt: options?.nuxt,
   };
 
   const resolveTarget = (root: string) =>
@@ -556,9 +568,17 @@ export const make: (
     const port =
       (devOptions?.port ?? options?.dev?.port) ||
       (yield* FrameworkCore.findEphemeralPort());
+    const host = devOptions?.host;
     const listener = yield* Effect.acquireRelease(
       Effect.tryPromise({
-        try: () => server.listen(port),
+        // Nitro's dev-server `listen` is listhen-backed; the second
+        // argument merges into listhen's options (older versions ignore
+        // it, degrading to the default host).
+        try: () =>
+          server.listen(
+            port,
+            host !== undefined ? { hostname: host } : undefined,
+          ),
         catch: (error) =>
           fail("Failed to start the dev server listener", error),
       }),

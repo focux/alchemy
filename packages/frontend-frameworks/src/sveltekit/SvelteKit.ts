@@ -603,6 +603,7 @@ export const make: (
       vite.version,
       devOptions?.port ?? options?.dev?.port,
     );
+    const host = devOptions?.host;
 
     const server = yield* Effect.acquireRelease(
       Effect.tryPromise({
@@ -612,6 +613,7 @@ export const make: (
             server: {
               ...config.server,
               port,
+              ...(host !== undefined ? { host } : undefined),
             },
           });
           return await server.listen();

@@ -16,12 +16,8 @@ import {
 import { Bucket } from "../S3/Bucket.ts";
 import { Queue } from "../SQS/Queue.ts";
 import { AssetDeployment } from "./AssetDeployment.ts";
-import { Server } from "./Server.ts";
-import {
-  makeKvSite,
-  type StaticSiteProps,
-  type StaticSiteRouterAttachment,
-} from "./StaticSite.ts";
+import { Server, type ServerDevProps } from "./Server.ts";
+import { makeKvSite, type StaticSiteProps } from "./StaticSite.ts";
 import type {
   WebsiteAssetsConfig,
   WebsiteDomainProps,
@@ -50,6 +46,11 @@ export interface NextjsProps {
    * @default true
    */
   memo?: MemoOptions | boolean;
+  /**
+   * Options for the local dev server that runs this site under
+   * `alchemy dev`.
+   */
+  dev?: ServerDevProps;
   /**
    * SSR server (Lambda) configuration.
    */
@@ -94,14 +95,21 @@ export interface NextjsProps {
    */
   assets?: WebsiteAssetsConfig;
   /**
-   * Optional custom domain.
-   */
-  domain?: string | WebsiteDomainProps;
-  /**
-   * Serve this site through an existing `AWS.Website.Router` instead of a
+   * Optional custom domain. A string is shorthand for `{ name }`; `null`
+   * explicitly clears a previously set domain. Set `domain.router` to
+   * serve the site through an existing `AWS.Website.Router` instead of a
    * standalone CloudFront distribution.
    */
-  router?: StaticSiteRouterAttachment;
+  domain?: string | WebsiteDomainProps | null;
+  /**
+   * Serve the site at its CloudFront default domain
+   * (`https://dxxxx.cloudfront.net`). `false` 301s default-domain requests
+   * to `https://<domain.name>` at the edge and excludes the default domain
+   * from the `urls` output. Requires `domain`; not applicable when
+   * `domain.router` is set.
+   * @default true
+   */
+  cloudfrontUrl?: boolean;
   /**
    * Additional CloudFront Function customizations.
    */
@@ -192,6 +200,7 @@ export const Nextjs = Effect.fn("AWS.Website.Nextjs")(
       root: props.rootDir,
       env: props.server?.environment,
       memo: props.memo,
+      dev: props.dev,
     });
 
     if (isLocal) {
@@ -212,6 +221,7 @@ export const Nextjs = Effect.fn("AWS.Website.Nextjs")(
         serverUrl: undefined,
         tagCacheTable: undefined,
         url: build.url,
+        urls: [build.url],
       };
     }
 
@@ -302,7 +312,7 @@ export const Nextjs = Effect.fn("AWS.Website.Nextjs")(
         CACHE_DYNAMO_TABLE: tagCacheTable.tableName,
         ...props.server?.environment,
       },
-      url: {
+      functionUrl: {
         authType: "NONE",
         // The default server is built with the aws-lambda-streaming
         // wrapper (the framework module enforces it).
@@ -359,7 +369,7 @@ export const Nextjs = Effect.fn("AWS.Website.Nextjs")(
       runtime: "nodejs24.x",
       memorySize: 512,
       timeout: Duration.seconds(30),
-      url: false,
+      functionUrl: false,
     });
 
     yield* revalidationFunction.bind`Allow(${revalidationFunction}, AWS.SQS.Consume(${revalidationQueue}))`(
@@ -401,7 +411,7 @@ export const Nextjs = Effect.fn("AWS.Website.Nextjs")(
       env: {
         BUCKET_NAME: bucket.bucketName,
       },
-      url: {
+      functionUrl: {
         authType: "NONE",
         // The image optimizer is buffered (streaming: false in the
         // OpenNext output manifest).
@@ -440,7 +450,7 @@ export const Nextjs = Effect.fn("AWS.Website.Nextjs")(
       path: build.clientDir as unknown as string,
       assets: props.assets,
       domain: props.domain,
-      router: props.router,
+      cloudfrontUrl: props.cloudfrontUrl,
       edge: props.edge,
       bucketName: props.bucketName,
       forceDestroy: props.forceDestroy,
