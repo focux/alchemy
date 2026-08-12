@@ -791,7 +791,15 @@ export const make = (
             process.env.NODE_ENV = INITIAL_NODE_ENV ?? "development";
           });
           const wakuConfig = yield* makeConfig(project, root, hooks);
-          const port = devOptions?.port ?? options?.port;
+          // `port: 0` (true OS-assigned) on Vite >= 8.2.1, probed ephemeral
+          // port on older Vite — see `resolveViteDevPort`. strictPort stays
+          // off for allocated ports so a probe race just moves to the next
+          // ephemeral port.
+          const explicitPort = devOptions?.port || options?.port;
+          const port = yield* FrameworkCore.resolveViteDevPort(
+            project.vite.version,
+            explicitPort,
+          );
           const server = yield* Effect.acquireRelease(
             Effect.tryPromise({
               try: async () => {
@@ -801,14 +809,7 @@ export const make = (
                   plugins: [
                     project.vitePlugins.unstable_combinedPlugins(wakuConfig),
                   ],
-                  ...(port !== undefined
-                    ? {
-                        server: {
-                          port,
-                          strictPort: devOptions?.port !== undefined,
-                        },
-                      }
-                    : undefined),
+                  server: { port, strictPort: !!explicitPort },
                 });
                 return await server.listen();
               },
