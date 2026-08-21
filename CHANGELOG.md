@@ -1,3 +1,13 @@
+## v2.0.0-beta.74
+
+### &nbsp;&nbsp;&nbsp;🐞 Bug Fixes
+
+- **alchemy**: Declare @alchemy.run/frontend-frameworks as an optional peer dependency &nbsp;-&nbsp; by **sam** in https://github.com/alchemy-run/alchemy/issues/1303 [<samp>(932d0)</samp>](https://github.com/alchemy-run/alchemy/commit/932d03cc2)
+
+##### &nbsp;&nbsp;&nbsp;&nbsp;[View changes on GitHub](https://github.com/alchemy-run/alchemy/compare/v2.0.0-beta.73...HEAD)
+
+---
+
 ## v2.0.0-beta.73
 
 ### &nbsp;&nbsp;&nbsp;🚨 Breaking Changes
