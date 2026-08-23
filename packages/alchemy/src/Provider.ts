@@ -421,7 +421,7 @@ export const effect = <
   LogsReq = never,
   ListReq = never,
 >(
-  cls: ResourceClassLike<R> | Platform<R, any, any, any, any>,
+  cls: ResourceClassLike<R> | Platform<R, any, any, any, any, any>,
   eff: Effect.Effect<
     ProviderServiceInput<
       R,
@@ -465,7 +465,7 @@ export const succeed = <
   LogsReq = never,
   ListReq = never,
 >(
-  cls: ResourceClass<R> | Platform<R, any, any, any, any>,
+  cls: ResourceClass<R> | Platform<R, any, any, any, any, any>,
   service: ProviderServiceInput<
     R,
     ReadReq,
@@ -530,13 +530,13 @@ export interface ProviderCollectionService {
 }
 
 export const collection = <
-  R extends ResourceClassLike<any> | Platform<any, any, any, any, any>,
+  R extends ResourceClassLike<any> | Platform<any, any, any, any, any, any>,
 >(
   resources: R[],
 ): Effect.Effect<
   ProviderCollectionService,
   never,
-  R extends ResourceClass<infer R> | Platform<infer R, any, any, any, any>
+  R extends ResourceClass<infer R> | Platform<infer R, any, any, any, any, any>
     ? Provider<R>
     : never
 > =>
@@ -662,7 +662,7 @@ export const findProviderByType: {
  */
 export const findProvider: {
   <R extends ResourceLike>(
-    resource: ResourceClassLike<R> | Platform<R, any, any, any, any>,
+    resource: ResourceClassLike<R> | Platform<R, any, any, any, any, any>,
     mode?: ProviderMode,
   ): Effect.Effect<ProviderService<R>>;
 } = (resource: { Type?: string; key?: string }, mode?: ProviderMode) =>
