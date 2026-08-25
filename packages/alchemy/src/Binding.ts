@@ -191,6 +191,9 @@ const routeClientDataPlane = (
           ? [arg]
           : [],
     );
+    // Account-scoped clients (no resource among the args) need no routing:
+    // the ambient environment is already mode-aware — a dev run's ambient IS
+    // the emulator (see AWS/Providers.ts), a deploy's is the live chain.
     if (resources.length === 0) return Effect.succeed(client);
     return Effect.gen(function* () {
       const planes: DataPlaneResolution[] = [];
